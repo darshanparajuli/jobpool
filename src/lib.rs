@@ -22,8 +22,6 @@ impl Worker {
     fn new(id: usize, work_queue: Arc<Mutex<VecDeque<Option<BoxedJob>>>>, condvar: Arc<Condvar>) -> Self {
         let builder = thread::Builder::new().name(format!("worker-{}", id));
         let handle = builder.spawn(move || loop {
-            let work: Option<BoxedJob>;
-
             let mut guard = work_queue.lock().unwrap();
             while guard.is_empty() {
                 // println!("[worker-{}] waiting...", id);
@@ -31,14 +29,9 @@ impl Worker {
                 // println!("[worker-{}] notified", id);
             }
 
-            match guard.pop_front() {
-                Some(front) => {
-                    // println!("[worker-{}] new job", id);
-                    work = front;
-                    drop(guard);
-                }
-                None => unreachable!("Uh-oh! This shouldn't be happening...!!!"),
-            }
+            // queue is not empty at this point, so unwrap() is safe
+            let work: Option<BoxedJob> = guard.pop_front().unwrap();
+            drop(guard);
 
             match work {
                 Some(job) => {
