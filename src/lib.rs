@@ -1,10 +1,46 @@
+// test
+
+//! A simple and lightweight threadpool API.
+//!
+//! # Getting started
+//!
+//! Add the following under `[dependencies]` on `Cargo.toml`:
+//!
+//! ```toml
+//! jobpool = "*" # or a specific version from crates.io
+//! ```
+//!
+//! Add the following to the root crate:
+//!
+//! ```rust
+//! extern crate jobpool;
+//! ```
+//!
+//! # Usage
+//!
+//! ```rust
+//! use jobpool::JobPool;
+//!
+//! let pool_size: usize = 8; // number of cpu cores is recommended
+//! let mut pool = JobPool::new(pool_size);
+//! pool.queue(|| {
+//!     // do some work
+//! });
+//! // ...
+//! pool.shutdown(); // waits for jobs to finish
+//! ```
+
+#![warn(missing_docs)]
+
 use std::sync::{Arc, Condvar, Mutex};
 use std::{process, thread};
 use std::collections::VecDeque;
 
 type BoxedJob = Box<Runnable + Send + 'static>;
 
+/// A trait for giving a type an ability to run some code.
 pub trait Runnable {
+    /// Runs some code.
     fn run(self: Box<Self>);
 }
 
@@ -59,6 +95,7 @@ impl Worker {
     }
 }
 
+/// JobPool manages a job queue to be run on a specified number of threads.
 pub struct JobPool {
     size: usize,
     workers: Option<Vec<Worker>>,
@@ -67,6 +104,30 @@ pub struct JobPool {
 }
 
 impl JobPool {
+    ///
+    /// Creates a new job pool.
+    ///
+    /// Using the number of cpu cores as argument for size is recommended.
+    /// Higher values can result in larger memory footprint,
+    /// and non-optimal performance.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the argument for size is 0.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use jobpool::JobPool;
+    ///
+    /// let pool_size: usize = 8; // number of cpu cores is recommended
+    /// let mut pool = JobPool::new(pool_size);
+    /// pool.queue(|| {
+    ///     // do some work
+    /// });
+    /// // ...
+    /// pool.shutdown(); // blocks until all jobs are done
+    /// ```
     pub fn new(size: usize) -> Self {
         if size == 0 {
             panic!("size cannot be 0")
@@ -92,14 +153,22 @@ impl JobPool {
     ///
     /// A queued job gets run in a first-come, first-serve basis.
     ///
-    /// ```
+    /// # Panics
+    ///
+    /// This method will panic if the JobPool instance has already been shutdown.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
     /// use jobpool::JobPool;
+    ///
+    /// let pool_size: usize = 8; // number of cpu cores is recommended
     /// let mut pool = JobPool::new(pool_size);
     /// pool.queue(|| {
     ///     // do some work
     /// });
     /// // ...
-    /// pool.shutdown();
+    /// pool.shutdown(); // blocks until all jobs are done
     /// ```
     pub fn queue<J>(&self, job: J)
     where
@@ -121,6 +190,25 @@ impl JobPool {
         self.condvar.notify_one();
     }
 
+    /// Shuts down this instance of JobPool.
+    ///
+    /// This method will wait for all of the queued jobs to finish.
+    /// It also gets called automatically as the instance goes out of scope,
+    /// so calling this method can be optional.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use jobpool::JobPool;
+    ///
+    /// let pool_size: usize = 8; // number of cpu cores is recommended
+    /// let mut pool = JobPool::new(pool_size);
+    /// pool.queue(|| {
+    ///     // do some work
+    /// });
+    /// // ...
+    /// pool.shutdown(); // blocks until all jobs are done
+    /// ```
     pub fn shutdown(&mut self) {
         if self.workers.is_none() {
             return;
