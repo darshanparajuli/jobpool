@@ -95,7 +95,7 @@ impl JobPool {
         }
     }
 
-    pub fn queue<J>(&mut self, job: J)
+    pub fn queue<J>(&self, job: J)
     where
         J: Runnable + Send + 'static,
     {
