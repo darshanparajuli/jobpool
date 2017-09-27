@@ -1,5 +1,5 @@
 # JobPool
-### A simple fixed-size thread pool library for Rust.
+### A simple, lightweight, and fixed-size thread pool library for Rust.
 ## Example
 ```rust
 use jobpool::JobPool;
