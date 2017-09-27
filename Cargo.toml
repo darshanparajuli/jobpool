@@ -1,6 +1,6 @@
 [package]
 name = "jobpool"
-version = "0.1.6"
+version = "0.1.7"
 authors = ["Darshan Parajuli <parajulidarshan@gmail.com>"]
 description = "A simple fixed-size thread pool library"
 repository = "https://github.com/darshanparajuli/jobpool"
