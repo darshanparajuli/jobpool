@@ -75,6 +75,10 @@ pub struct JobPool {
 
 impl JobPool {
     pub fn new(size: usize) -> Self {
+        if size == 0 {
+            panic!("size cannot be 0")
+        }
+
         let mut workers = Vec::new();
         let job_queue = Arc::new(Mutex::new(VecDeque::new()));
         let condvar = Arc::new(Condvar::new());
