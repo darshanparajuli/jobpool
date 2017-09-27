@@ -1,5 +1,3 @@
-// test
-
 //! A simple, lightweight, and fixed-size threadpool API.
 //!
 //! # Getting started
