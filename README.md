@@ -1,2 +1,2 @@
 # JobPool
-## Simple thread pool library for Rust.
+## A simple thread pool library for Rust.
