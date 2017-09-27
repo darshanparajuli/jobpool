@@ -176,4 +176,11 @@ mod tests {
             pool.shutdown();
         }
     }
+
+    #[test]
+    #[should_panic]
+    fn panic_on_zero_sized_jobpool() {
+        let mut pool = JobPool::new(0);
+        pool.shutdown();
+    }
 }
