@@ -1,6 +1,6 @@
 # JobPool
-## A simple thread pool library for Rust.
-### Example
+### A simple fixed-size thread pool library for Rust.
+## Example
 ```rust
 use jobpool::JobPool;
 use std::thread;
