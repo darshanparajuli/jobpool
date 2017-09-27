@@ -6,8 +6,7 @@ description = "A simple fixed-size thread pool library"
 repository = "https://github.com/darshanparajuli/jobpool"
 readme = "README.md"
 keywords = ["threadpool", "threads", "multi-threading", "jobpool", "concurrency"]
-category = ["concurrency"]
+categories = ["concurrency"]
 license = "MIT"
-license-file = "LICENSE"
 
 [dependencies]
