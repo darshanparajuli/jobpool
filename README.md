@@ -30,7 +30,8 @@ fn main() {
         }
     }
 
-    // Explicit call to shutdown; JobPool shuts down automatically after going out of scope as well.
+    // Explicit call to shutdown; JobPool shuts down automatically after
+    // going out of scope as well.
     pool.shutdown();
 }
 ```
