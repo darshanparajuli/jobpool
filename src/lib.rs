@@ -88,6 +88,19 @@ impl JobPool {
         }
     }
 
+    /// Queues a new "job".
+    ///
+    /// A queued job gets run in a first-come, first-serve basis.
+    ///
+    /// ```
+    /// use jobpool::JobPool;
+    /// let mut pool = JobPool::new(pool_size);
+    /// pool.queue(|| {
+    ///     // do some work
+    /// });
+    /// // ...
+    /// pool.shutdown();
+    /// ```
     pub fn queue<J>(&self, job: J)
     where
         J: Runnable + Send + 'static,
