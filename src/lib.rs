@@ -1,6 +1,6 @@
 // test
 
-//! A simple and lightweight threadpool API.
+//! A simple, lightweight, and fixed-size threadpool API.
 //!
 //! # Getting started
 //!
