@@ -28,4 +28,5 @@ fn main() {
     }
 
     pool.shutdown();
+    println!("JobPool has shutdown!");
 }
