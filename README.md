@@ -6,6 +6,8 @@ A simple, lightweight, and fixed-size thread pool library for Rust.
 
 ## Example
 ```rust
+extern crate jobpool;
+
 use jobpool::JobPool;
 use std::thread;
 use std::time::Duration;
