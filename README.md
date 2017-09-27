@@ -1,6 +1,6 @@
-[![Build Status](https://travis-ci.org/darshanparajuli/jobpool.svg?branch=master)](https://travis-ci.org/darshanparajuli/jobpool)
 # JobPool
 ### A simple, lightweight, and fixed-size thread pool library for Rust.
+### [![Build Status](https://travis-ci.org/darshanparajuli/jobpool.svg?branch=master)](https://travis-ci.org/darshanparajuli/jobpool)
 ## Example
 ```rust
 use jobpool::JobPool;
