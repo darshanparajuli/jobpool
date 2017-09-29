@@ -209,20 +209,69 @@ impl JobPool {
     /// pool.shutdown(); // blocks until all jobs are done
     /// ```
     pub fn shutdown(&mut self) {
-        if self.workers.is_none() {
+        if !self.can_shutdown() {
             return;
+        }
+
+        for worker in &mut self.workers.take().unwrap() {
+            if let Some(handle) = worker.handle.take() {
+                // println!("[{}] shutting down", handle.thread().name().unwrap());
+                let _ = handle.join();
+            }
+        }
+    }
+
+    /// Shuts down this instance of JobPool without waiting for threads to finish.
+    ///
+    /// This method will return all of the threads' `JoinHandle`s.
+    /// It won't wait for the threads to finish, and it must be called explicitly.
+    /// Calling `shutdown()` after this method won't have any effect.
+    /// Unlike `shutdown()`, it doesn't get called automatically after going out of scope.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use jobpool::JobPool;
+    ///
+    /// let pool_size: usize = 8; // number of cpu cores is recommended
+    /// let mut pool = JobPool::new(pool_size);
+    /// pool.queue(|| {
+    ///     // do some work
+    /// });
+    /// // ...
+    /// let handles = pool.shutdown_no_wait();
+    /// // ...
+    /// if let Some(handles) = handles {
+    ///     for handle in handles {
+    ///         let _ = handle.join();
+    ///     }
+    /// }
+    /// ```
+    pub fn shutdown_no_wait(&mut self) -> Option<Vec<thread::JoinHandle<()>>> {
+        if !self.can_shutdown() {
+            return None;
+        }
+
+        let mut handles = Vec::new();
+        for worker in &mut self.workers.take().unwrap() {
+            if let Some(handle) = worker.handle.take() {
+                handles.push(handle);
+            }
+        }
+
+        Some(handles)
+    }
+
+    fn can_shutdown(&self) -> bool {
+        if self.workers.is_none() {
+            return false;
         }
 
         for _ in 0..self.size {
             self.push(None);
         }
 
-        for worker in &mut self.workers.take().unwrap() {
-            if let Some(handle) = worker.handle.take() {
-                // println!("[{}] shutting down", handle.thread().name().unwrap());
-                handle.join().unwrap();
-            }
-        }
+        return true;
     }
 }
 
@@ -233,11 +282,11 @@ impl Drop for JobPool {
 }
 
 #[cfg(test)]
+#[allow(unused)]
 mod tests {
     use JobPool;
 
     #[test]
-    #[allow(unused)]
     fn shuts_down() {
         let mut pool = JobPool::new(10);
         for _ in 0..100 {
@@ -248,7 +297,6 @@ mod tests {
 
     #[test]
     #[should_panic]
-    #[allow(unused)]
     fn panic_on_reuse() {
         let mut pool = JobPool::new(10);
         for _ in 0..100 {
@@ -259,7 +307,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(unused)]
     fn no_panic_on_multiple_shutdowns() {
         let mut pool = JobPool::new(10);
         for _ in 0..100 {
@@ -275,5 +322,16 @@ mod tests {
     fn panic_on_zero_sized_jobpool() {
         let mut pool = JobPool::new(0);
         pool.shutdown();
+    }
+
+    #[test]
+    fn shutdown_no_wait() {
+        let mut pool = JobPool::new(8);
+        for _ in 0..100 {
+            pool.queue(|| { let a = 1 + 2; });
+        }
+        let handles = pool.shutdown_no_wait();
+        assert!(handles.is_some());
+        assert_eq!(handles.unwrap().len(), 8);
     }
 }
