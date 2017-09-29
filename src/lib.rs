@@ -1,4 +1,4 @@
-//! A simple, lightweight, and fixed-size threadpool API.
+//! A simple, lightweight, and fixed-size threadpool implementation.
 //!
 //! # Getting started
 //!
