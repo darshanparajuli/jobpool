@@ -252,7 +252,7 @@ impl JobPool {
             return None;
         }
 
-        let mut handles = Vec::new();
+        let mut handles = Vec::with_capacity(self.size);
         for worker in &mut self.workers.take().unwrap() {
             if let Some(handle) = worker.handle.take() {
                 handles.push(handle);
