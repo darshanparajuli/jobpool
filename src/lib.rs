@@ -502,14 +502,14 @@ mod tests {
         let mut pool = JobPool::new(8);
         pool.auto_grow(100);
 
-        for _ in 0..100 {
+        for _ in 0..1000 {
             pool.queue(|| {
                 // fake work
                 thread::sleep(Duration::from_millis(500));
             });
         }
 
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(350));
 
         let handles = pool.shutdown_no_wait();
         assert!(handles.is_some());
