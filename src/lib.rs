@@ -45,32 +45,49 @@ mod tests {
     use std::thread;
     use std::sync::{Arc, Mutex, Condvar};
 
+    struct Waiter {
+        pair: (Mutex<bool>, Condvar),
+    }
+
+    impl Waiter {
+        fn new() -> Self {
+            Self {
+                pair: (Mutex::new(false), Condvar::new()),
+            }
+        }
+
+        fn wait(&self) {
+            let &(ref mutex, ref cvar) = &self.pair;
+            let mut guard = mutex.lock().unwrap();
+            while !*guard {
+                guard = cvar.wait(guard).unwrap();
+            }
+        }
+
+        fn notify(&self) {
+            let &(ref mutex, ref cvar) = &self.pair;
+            let mut guard = mutex.lock().unwrap();
+            *guard = true;
+            cvar.notify_all();
+        }
+    }
+
     #[test]
     fn shuts_down() {
         let mut pool = JobPool::new(10);
 
-        let pair = Arc::new((Mutex::new(false), Condvar::new()));
+        let waiter = Arc::new(Waiter::new());
 
         for _ in 0..100 {
-            let pair2 = pair.clone();
-            pool.queue(move || {
-                let &(ref mutex, ref cvar) = &*pair2;
-                let mut guard = mutex.lock().unwrap();
-                while !*guard {
-                    guard = cvar.wait(guard).unwrap();
-                }
-            });
+            let waiter = waiter.clone();
+            pool.queue(move || { waiter.wait(); });
         }
 
         thread::sleep(Duration::from_millis(500));
 
         assert_eq!(pool.active_workers_count(), 10);
 
-        let &(ref mutex, ref cvar) = &*pair;
-        let mut guard = mutex.lock().unwrap();
-        *guard = true;
-        cvar.notify_all();
-        drop(guard);
+        waiter.notify();
 
         pool.shutdown();
     }
@@ -80,28 +97,18 @@ mod tests {
         let mut pool = JobPool::new(8);
         pool.auto_grow(100);
 
-        let pair = Arc::new((Mutex::new(false), Condvar::new()));
+        let waiter = Arc::new(Waiter::new());
 
         for _ in 0..100 {
-            let pair2 = pair.clone();
-            pool.queue(move || {
-                let &(ref mutex, ref cvar) = &*pair2;
-                let mut guard = mutex.lock().unwrap();
-                while !*guard {
-                    guard = cvar.wait(guard).unwrap();
-                }
-            });
+            let waiter = waiter.clone();
+            pool.queue(move || { waiter.wait(); });
         }
 
         thread::sleep(Duration::from_millis(500));
 
         assert!(pool.active_workers_count() > 8);
 
-        let &(ref mutex, ref cvar) = &*pair;
-        let mut guard = mutex.lock().unwrap();
-        *guard = true;
-        cvar.notify_all();
-        drop(guard);
+        waiter.notify();
 
         pool.shutdown();
     }
@@ -160,28 +167,18 @@ mod tests {
         let mut pool = JobPool::new(8);
         pool.auto_grow(100);
 
-        let pair = Arc::new((Mutex::new(false), Condvar::new()));
+        let waiter = Arc::new(Waiter::new());
 
         for _ in 0..100 {
-            let pair2 = pair.clone();
-            pool.queue(move || {
-                let &(ref mutex, ref cvar) = &*pair2;
-                let mut guard = mutex.lock().unwrap();
-                while !*guard {
-                    guard = cvar.wait(guard).unwrap();
-                }
-            });
+            let waiter = waiter.clone();
+            pool.queue(move || { waiter.wait(); });
         }
 
         thread::sleep(Duration::from_millis(500));
 
         assert!(pool.active_workers_count() > 8);
 
-        let &(ref mutex, ref cvar) = &*pair;
-        let mut guard = mutex.lock().unwrap();
-        *guard = true;
-        cvar.notify_all();
-        drop(guard);
+        waiter.notify();
 
         let handles = pool.shutdown_no_wait();
         assert!(handles.is_some());
@@ -198,28 +195,18 @@ mod tests {
         let mut pool = JobPool::new(10);
         pool.auto_grow(100);
 
-        let pair = Arc::new((Mutex::new(false), Condvar::new()));
+        let waiter = Arc::new(Waiter::new());
 
         for _ in 0..10 {
-            let pair2 = pair.clone();
-            pool.queue(move || {
-                let &(ref mutex, ref cvar) = &*pair2;
-                let mut guard = mutex.lock().unwrap();
-                while !*guard {
-                    guard = cvar.wait(guard).unwrap();
-                }
-            });
+            let waiter = waiter.clone();
+            pool.queue(move || { waiter.wait(); });
         }
 
         thread::sleep(Duration::from_millis(500));
 
         assert_eq!(pool.active_workers_count(), 10);
 
-        let &(ref mutex, ref cvar) = &*pair;
-        let mut guard = mutex.lock().unwrap();
-        *guard = true;
-        cvar.notify_all();
-        drop(guard);
+        waiter.notify();
 
         pool.shutdown();
     }
