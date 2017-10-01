@@ -61,35 +61,18 @@ impl Worker {
 
             busy_workers_count.fetch_add(1, Ordering::SeqCst);
 
-            let max_size_prime = max_size.load(Ordering::SeqCst);
-            if max_size_prime != 0 {
-                let mut guard = workers.lock().unwrap();
-                // println!("remaining job count: {}", remaining_job_count);
-                if remaining_job_count > guard.len() {
-                    let busy_workers = busy_workers_count.load(Ordering::SeqCst);
-                    if guard.len() < max_size_prime && busy_workers >= *min_size && !shutdown.load(Ordering::SeqCst) {
-                        let new_id = id_counter.fetch_add(1, Ordering::SeqCst);
-                        // println!("inserting new one: {}", new_id);
-                        guard.insert(
-                            new_id,
-                            Worker::new(
-                                new_id,
-                                id_counter.clone(),
-                                job_queue.clone(),
-                                condvar.clone(),
-                                workers.clone(),
-                                removed_handles.clone(),
-                                busy_workers_count.clone(),
-                                min_size.clone(),
-                                max_size.clone(),
-                                shutdown.clone(),
-                            ),
-                        );
-                        // println!("new workers size: {}", guard.len());
-                    }
-                }
-                // drop(guard); // commented out just for the reminder...
-            }
+            try_add_new_worker(
+                id_counter.clone(),
+                job_queue.clone(),
+                condvar.clone(),
+                workers.clone(),
+                removed_handles.clone(),
+                busy_workers_count.clone(),
+                min_size.clone(),
+                max_size.clone(),
+                shutdown.clone(),
+                Some(remaining_job_count),
+            );
 
             // println!("[worker-{}] running job", id);
             job.run();
@@ -127,10 +110,59 @@ impl Worker {
     }
 }
 
+fn try_add_new_worker(
+    id_counter: Arc<AtomicUsize>,
+    job_queue: Arc<Mutex<VecDeque<BoxedJob>>>,
+    condvar: Arc<Condvar>,
+    workers: Arc<Mutex<HashMap<usize, Worker>>>,
+    removed_handles: Arc<Mutex<Vec<Option<thread::JoinHandle<()>>>>>,
+    busy_workers_count: Arc<AtomicUsize>,
+    min_size: Arc<usize>,
+    max_size: Arc<AtomicUsize>,
+    shutdown: Arc<AtomicBool>,
+    remaining_job_count: Option<usize>,
+) {
+    let max_size_prime = max_size.load(Ordering::SeqCst);
+    if max_size_prime != 0 {
+        // println!("remaining job count: {}", remaining_job_count);
+        let busy_workers = busy_workers_count.load(Ordering::SeqCst);
+
+        if let Some(remaining_job_count) = remaining_job_count {
+            if remaining_job_count <= busy_workers {
+                return;
+            }
+        }
+
+        let mut guard = workers.lock().unwrap();
+        if guard.len() < max_size_prime && busy_workers >= *min_size && !shutdown.load(Ordering::SeqCst) {
+            let new_id = id_counter.fetch_add(1, Ordering::SeqCst);
+            // println!("inserting new one: {}", new_id);
+            guard.insert(
+                new_id,
+                Worker::new(
+                    new_id,
+                    id_counter.clone(),
+                    job_queue.clone(),
+                    condvar.clone(),
+                    workers.clone(),
+                    removed_handles.clone(),
+                    busy_workers_count.clone(),
+                    min_size.clone(),
+                    max_size.clone(),
+                    shutdown.clone(),
+                ),
+            );
+            // println!("new workers size: {}", guard.len());
+        }
+        // drop(guard); // commented out just for the reminder...
+    }
+}
+
 /// JobPool manages a job queue to be run on a specified number of threads.
 pub struct JobPool {
     size: Arc<usize>,
     max_size: Arc<AtomicUsize>,
+    worker_id_counter: Arc<AtomicUsize>,
     busy_workers_count: Arc<AtomicUsize>,
     workers: Arc<Mutex<HashMap<usize, Worker>>>,
     removed_handles: Arc<Mutex<Vec<Option<thread::JoinHandle<()>>>>>,
@@ -204,6 +236,7 @@ impl JobPool {
         Self {
             size,
             max_size,
+            worker_id_counter,
             busy_workers_count,
             workers,
             removed_handles,
@@ -243,6 +276,18 @@ impl JobPool {
             panic!("Error: this threadpool has been shutdown!");
         } else {
             self.push(Box::new(job));
+            try_add_new_worker(
+                self.worker_id_counter.clone(),
+                self.job_queue.clone(),
+                self.condvar.clone(),
+                self.workers.clone(),
+                self.removed_handles.clone(),
+                self.busy_workers_count.clone(),
+                self.size.clone(),
+                self.max_size.clone(),
+                self.shutdown.clone(),
+                None,
+            );
         }
     }
 
