@@ -126,14 +126,15 @@ fn try_add_new_worker(
     if max_size_prime != 0 {
         // println!("remaining job count: {}", remaining_job_count);
         let busy_workers = busy_workers_count.load(Ordering::SeqCst);
+        let mut guard = workers.lock().unwrap();
+        let available_workers = guard.len() - busy_workers;
 
         if let Some(remaining_job_count) = remaining_job_count {
-            if remaining_job_count <= busy_workers {
+            if remaining_job_count <= available_workers {
                 return;
             }
         }
 
-        let mut guard = workers.lock().unwrap();
         if guard.len() < max_size_prime && busy_workers >= *min_size && !shutdown.load(Ordering::SeqCst) {
             let new_id = id_counter.fetch_add(1, Ordering::SeqCst);
             // println!("inserting new one: {}", new_id);
