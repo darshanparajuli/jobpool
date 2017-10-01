@@ -21,9 +21,13 @@
 //!
 //! let pool_size: usize = 8; // number of cpu cores is recommended
 //! let mut pool = JobPool::new(pool_size);
-//! pool.queue(|| {
-//!     // do some work
-//! });
+//! // pool.auto_grow(100);
+//!
+//! for _ in 0..1000 {
+//!     pool.queue(|| {
+//!         // do some work
+//!     });
+//! }
 //! // ...
 //! pool.shutdown(); // waits for jobs to finish
 //! ```
