@@ -31,8 +31,9 @@
 #![warn(missing_docs)]
 
 use std::sync::{Arc, Condvar, Mutex};
+use std::sync::atomic::{AtomicUsize, AtomicBool, Ordering};
 use std::{process, thread};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 type BoxedJob = Box<Runnable + Send + 'static>;
 
@@ -54,29 +55,91 @@ struct Worker {
 }
 
 impl Worker {
-    fn new(id: usize, work_queue: Arc<Mutex<VecDeque<Option<BoxedJob>>>>, condvar: Arc<Condvar>) -> Self {
+    fn new(
+        id: usize,
+        id_counter: Arc<AtomicUsize>,
+        job_queue: Arc<Mutex<VecDeque<BoxedJob>>>,
+        condvar: Arc<Condvar>,
+        workers: Arc<Mutex<HashMap<usize, Worker>>>,
+        removed_handles: Arc<Mutex<Vec<Option<thread::JoinHandle<()>>>>>,
+        busy_workers_count: Arc<AtomicUsize>,
+        min_size: Arc<usize>,
+        max_size: Arc<AtomicUsize>,
+        shutdown: Arc<AtomicBool>,
+    ) -> Self {
         let builder = thread::Builder::new().name(format!("worker-{}", id));
         let handle = builder.spawn(move || loop {
-            let job = {
-                let mut guard = work_queue.lock().unwrap();
-                while guard.is_empty() {
+            let (job, remaining_job_count) = {
+                let mut guard = job_queue.lock().unwrap();
+                while guard.is_empty() && !shutdown.load(Ordering::SeqCst) {
                     // println!("[worker-{}] waiting...", id);
                     guard = condvar.wait(guard).unwrap();
                     // println!("[worker-{}] notified", id);
                 }
+
+                // println!("[worker-{}] got new new job", id);
+
                 // queue is not empty at this point, so unwrap() is safe
-                guard.pop_front().unwrap()
+                (guard.pop_front(), guard.len())
             };
 
-            match job {
-                Some(job) => {
-                    // println!("[worker-{}] running job", id);
-                    job.run();
+            if job.is_none() {
+                break;
+            }
+
+            let job = job.unwrap();
+
+            busy_workers_count.fetch_add(1, Ordering::SeqCst);
+
+            let max_size_prime = max_size.load(Ordering::SeqCst);
+            if max_size_prime != 0 {
+                let mut guard = workers.lock().unwrap();
+                // println!("remaining job count: {}", remaining_job_count);
+                if remaining_job_count > guard.len() {
+                    let busy_workers = busy_workers_count.load(Ordering::SeqCst);
+                    if guard.len() < max_size_prime && busy_workers >= *min_size && !shutdown.load(Ordering::SeqCst) {
+                        let new_id = id_counter.fetch_add(1, Ordering::SeqCst);
+                        // println!("inserting new one: {}", new_id);
+                        guard.insert(
+                            new_id,
+                            Worker::new(
+                                new_id,
+                                id_counter.clone(),
+                                job_queue.clone(),
+                                condvar.clone(),
+                                workers.clone(),
+                                removed_handles.clone(),
+                                busy_workers_count.clone(),
+                                min_size.clone(),
+                                max_size.clone(),
+                                shutdown.clone(),
+                            ),
+                        );
+                        // println!("new workers size: {}", guard.len());
+                    }
                 }
-                None => {
-                    // println!("[worker-{}] done working", id);
-                    break;
+                // drop(guard); // commented out just for the reminder...
+            }
+
+            // println!("[worker-{}] running job", id);
+            job.run();
+
+            busy_workers_count.fetch_sub(1, Ordering::SeqCst);
+
+            let mut guard = workers.lock().unwrap();
+            if guard.len() > *min_size && busy_workers_count.load(Ordering::SeqCst) < *min_size {
+                let worker = guard.remove(&id);
+                drop(guard);
+
+                if let Some(worker) = worker {
+                    if let Some(handle) = worker.handle {
+                        let mut guard = removed_handles.lock().unwrap();
+                        guard.push(Some(handle));
+                    }
                 }
+
+                // println!("[worker-{}] done working and REMOVED", id);
+                break;
             }
         });
 
@@ -96,10 +159,14 @@ impl Worker {
 
 /// JobPool manages a job queue to be run on a specified number of threads.
 pub struct JobPool {
-    size: usize,
-    workers: Option<Vec<Worker>>,
-    job_queue: Arc<Mutex<VecDeque<Option<BoxedJob>>>>,
+    size: Arc<usize>,
+    max_size: Arc<AtomicUsize>,
+    busy_workers_count: Arc<AtomicUsize>,
+    workers: Arc<Mutex<HashMap<usize, Worker>>>,
+    removed_handles: Arc<Mutex<Vec<Option<thread::JoinHandle<()>>>>>,
+    job_queue: Arc<Mutex<VecDeque<BoxedJob>>>,
     condvar: Arc<Condvar>,
+    shutdown: Arc<AtomicBool>,
 }
 
 impl JobPool {
@@ -107,7 +174,7 @@ impl JobPool {
     /// Creates a new job pool.
     ///
     /// Using the number of cpu cores as argument for size is recommended.
-    /// Higher values can result in larger memory footprint,
+    /// Higher values can result iSeqCstn larger memory footprint,
     /// and non-optimal performance.
     ///
     /// # Panics
@@ -132,19 +199,47 @@ impl JobPool {
             panic!("size cannot be 0")
         }
 
-        let mut workers = Vec::new();
         let job_queue = Arc::new(Mutex::new(VecDeque::new()));
         let condvar = Arc::new(Condvar::new());
+        let max_size = Arc::new(AtomicUsize::new(0));
+        let worker_id_counter = Arc::new(AtomicUsize::new(size));
+        let busy_workers_count = Arc::new(AtomicUsize::new(0));
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let size = Arc::new(size);
+        let removed_handles = Arc::new(Mutex::new(Vec::new()));
 
-        for id in 0..size {
-            workers.push(Worker::new(id, job_queue.clone(), condvar.clone()));
-        }
+        let workers = {
+            let workers = Arc::new(Mutex::new(HashMap::new()));
+            let mut guard = workers.lock().unwrap();
+            for id in 0..*size {
+                guard.insert(
+                    id,
+                    Worker::new(
+                        id,
+                        worker_id_counter.clone(),
+                        job_queue.clone(),
+                        condvar.clone(),
+                        workers.clone(),
+                        removed_handles.clone(),
+                        busy_workers_count.clone(),
+                        size.clone(),
+                        max_size.clone(),
+                        shutdown.clone(),
+                    ),
+                );
+            }
+            workers.clone()
+        };
 
         Self {
             size,
-            workers: Some(workers),
+            max_size,
+            busy_workers_count,
+            workers,
+            removed_handles,
             job_queue,
             condvar,
+            shutdown,
         }
     }
 
@@ -169,21 +264,31 @@ impl JobPool {
     /// // ...
     /// pool.shutdown(); // blocks until all jobs are done
     /// ```
-    pub fn queue<J>(&self, job: J)
+    pub fn queue<J>(&mut self, job: J)
     where
         J: Runnable + Send + 'static,
     {
-        match self.workers {
-            Some(_) => {
-                self.push(Some(Box::new(job)));
-            }
-            None => {
-                panic!("Error: this threadpool has been shutdown!");
-            }
+        if self.shutdown.load(Ordering::SeqCst) {
+            panic!("Error: this threadpool has been shutdown!");
+        } else {
+            self.push(Box::new(job));
         }
     }
 
-    fn push(&self, job: Option<BoxedJob>) {
+    /// Automatically increase the number of worker threads as needed until `max_size` is reached.
+    pub fn auto_grow(&mut self, max_size: usize) {
+        if max_size <= *self.size {
+            panic!("max_size must be greater than initial JobPool size");
+        }
+        self.max_size.store(max_size, Ordering::SeqCst);
+    }
+
+    /// Get the number of current active worker threads.
+    pub fn active_workers_count(&self) -> usize {
+        return self.busy_workers_count.load(Ordering::SeqCst);
+    }
+
+    fn push(&mut self, job: BoxedJob) {
         let mut guard = self.job_queue.lock().unwrap();
         guard.push_back(job);
         self.condvar.notify_one();
@@ -213,11 +318,27 @@ impl JobPool {
             return;
         }
 
-        for worker in &mut self.workers.take().unwrap() {
+        let mut handles = Vec::new();
+
+        let mut guard = self.workers.lock().unwrap();
+        handles.reserve(guard.len());
+
+        for (_, worker) in &mut *guard {
             if let Some(handle) = worker.handle.take() {
                 // println!("[{}] shutting down", handle.thread().name().unwrap());
-                let _ = handle.join();
+                handles.push(handle);
             }
+        }
+        drop(guard);
+
+        let mut guard = self.removed_handles.lock().unwrap();
+        for handle in &mut *guard {
+            handles.push(handle.take().unwrap());
+        }
+        drop(guard);
+
+        for handle in handles {
+            let _ = handle.join();
         }
     }
 
@@ -252,24 +373,35 @@ impl JobPool {
             return None;
         }
 
-        let mut handles = Vec::with_capacity(self.size);
-        for worker in &mut self.workers.take().unwrap() {
+        let mut handles = Vec::new();
+
+        let mut guard = self.workers.lock().unwrap();
+        handles.reserve(guard.len());
+
+        for (_, worker) in &mut *guard {
             if let Some(handle) = worker.handle.take() {
+                // println!("[{}] shutting down", handle.thread().name().unwrap());
                 handles.push(handle);
             }
         }
+        drop(guard);
+
+        let mut guard = self.removed_handles.lock().unwrap();
+        for handle in &mut *guard {
+            handles.push(handle.take().unwrap());
+        }
+        drop(guard);
 
         Some(handles)
     }
 
-    fn can_shutdown(&self) -> bool {
-        if self.workers.is_none() {
+    fn can_shutdown(&mut self) -> bool {
+        if self.shutdown.load(Ordering::SeqCst) {
             return false;
         }
 
-        for _ in 0..self.size {
-            self.push(None);
-        }
+        self.shutdown.store(true, Ordering::SeqCst);
+        self.condvar.notify_all();
 
         return true;
     }
@@ -285,13 +417,34 @@ impl Drop for JobPool {
 #[allow(unused)]
 mod tests {
     use JobPool;
+    use std::time::Duration;
+    use std::thread;
 
     #[test]
     fn shuts_down() {
         let mut pool = JobPool::new(10);
         for _ in 0..100 {
-            pool.queue(|| { let a = 1 + 2; });
+            pool.queue(|| {
+                // fake work
+                thread::sleep(Duration::from_millis(10));
+            });
         }
+        assert_eq!(pool.workers.lock().unwrap().len(), 10);
+        pool.shutdown();
+    }
+
+    #[test]
+    fn shuts_down_with_auto_grow() {
+        let mut pool = JobPool::new(10);
+        pool.auto_grow(100);
+        for _ in 0..100 {
+            pool.queue(|| {
+                // fake work
+                thread::sleep(Duration::from_millis(100));
+            });
+        }
+        thread::sleep(Duration::from_millis(50));
+        assert!(pool.active_workers_count() > 10);
         pool.shutdown();
     }
 
@@ -300,7 +453,10 @@ mod tests {
     fn panic_on_reuse() {
         let mut pool = JobPool::new(10);
         for _ in 0..100 {
-            pool.queue(|| { let a = 1 + 2; });
+            pool.queue(|| {
+                // fake work
+                thread::sleep(Duration::from_millis(10));
+            });
         }
         pool.shutdown();
         pool.queue(|| { let a = 1 + 2; });
@@ -310,7 +466,10 @@ mod tests {
     fn no_panic_on_multiple_shutdowns() {
         let mut pool = JobPool::new(10);
         for _ in 0..100 {
-            pool.queue(|| { let a = 1 + 2; });
+            pool.queue(|| {
+                // fake work
+                thread::sleep(Duration::from_millis(10));
+            });
         }
         for _ in 0..10 {
             pool.shutdown();
@@ -328,10 +487,38 @@ mod tests {
     fn shutdown_no_wait() {
         let mut pool = JobPool::new(8);
         for _ in 0..100 {
-            pool.queue(|| { let a = 1 + 2; });
+            pool.queue(|| {
+                // fake work
+                thread::sleep(Duration::from_millis(10));
+            });
         }
         let handles = pool.shutdown_no_wait();
         assert!(handles.is_some());
         assert_eq!(handles.unwrap().len(), 8);
+    }
+
+    #[test]
+    fn shutdown_no_wait_with_auto_grow() {
+        let mut pool = JobPool::new(8);
+        pool.auto_grow(100);
+
+        for _ in 0..100 {
+            pool.queue(|| {
+                // fake work
+                thread::sleep(Duration::from_millis(500));
+            });
+        }
+
+        thread::sleep(Duration::from_millis(100));
+
+        let handles = pool.shutdown_no_wait();
+        assert!(handles.is_some());
+
+        let handles = handles.unwrap();
+        assert!(handles.len() > 8);
+
+        for handle in handles {
+            let _ = handle.join();
+        }
     }
 }
