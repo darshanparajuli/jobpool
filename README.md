@@ -16,6 +16,7 @@ use std::sync::mpsc;
 fn main() {
     let pool_size = 8; // or number of cpu cores
     let mut pool = JobPool::new(pool_size);
+    // pool.auto_grow(100);
 
     let (tx, rx) = mpsc::channel();
 
