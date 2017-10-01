@@ -522,4 +522,19 @@ mod tests {
             let _ = handle.join();
         }
     }
+
+    #[test]
+    fn shouldnt_auto_grow() {
+        let mut pool = JobPool::new(10);
+        pool.auto_grow(100);
+        for _ in 0..10 {
+            pool.queue(|| {
+                // fake work
+                thread::sleep(Duration::from_millis(100));
+            });
+        }
+        thread::sleep(Duration::from_millis(50));
+        assert!(pool.active_workers_count() == 10);
+        pool.shutdown();
+    }
 }
