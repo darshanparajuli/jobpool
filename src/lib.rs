@@ -39,6 +39,7 @@ mod tests {
     use JobPool;
     use std::time::Duration;
     use std::thread;
+    use std::sync::{Arc, Mutex, Condvar};
 
     #[test]
     fn shuts_down() {
@@ -58,17 +59,31 @@ mod tests {
 
     #[test]
     fn shuts_down_with_auto_grow() {
-        let mut pool = JobPool::new(10);
+        let mut pool = JobPool::new(8);
         pool.auto_grow(100);
+
+        let pair = Arc::new((Mutex::new(false), Condvar::new()));
+
         for _ in 0..100 {
-            pool.queue(|| {
-                // fake work
-                thread::sleep(Duration::from_millis(1000));
+            let pair2 = pair.clone();
+            pool.queue(move || {
+                let &(ref mutex, ref cvar) = &*pair2;
+                let mut guard = mutex.lock().unwrap();
+                while !*guard {
+                    guard = cvar.wait(guard).unwrap();
+                }
             });
         }
 
-        thread::sleep(Duration::from_millis(600));
-        assert!(pool.active_workers_count() > 10);
+        thread::sleep(Duration::from_millis(500));
+
+        assert!(pool.active_workers_count() > 8);
+
+        let &(ref mutex, ref cvar) = &*pair;
+        let mut guard = mutex.lock().unwrap();
+        *guard = true;
+        cvar.notify_all();
+        drop(guard);
 
         pool.shutdown();
     }
@@ -127,16 +142,28 @@ mod tests {
         let mut pool = JobPool::new(8);
         pool.auto_grow(100);
 
-        for _ in 0..1000 {
-            pool.queue(|| {
-                // fake work
-                thread::sleep(Duration::from_millis(1000));
+        let pair = Arc::new((Mutex::new(false), Condvar::new()));
+
+        for _ in 0..100 {
+            let pair2 = pair.clone();
+            pool.queue(move || {
+                let &(ref mutex, ref cvar) = &*pair2;
+                let mut guard = mutex.lock().unwrap();
+                while !*guard {
+                    guard = cvar.wait(guard).unwrap();
+                }
             });
         }
 
-        thread::sleep(Duration::from_millis(600));
+        thread::sleep(Duration::from_millis(500));
 
         assert!(pool.active_workers_count() > 8);
+
+        let &(ref mutex, ref cvar) = &*pair;
+        let mut guard = mutex.lock().unwrap();
+        *guard = true;
+        cvar.notify_all();
+        drop(guard);
 
         let handles = pool.shutdown_no_wait();
         assert!(handles.is_some());
