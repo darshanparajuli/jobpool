@@ -246,6 +246,27 @@ impl JobPool {
     }
 
     /// Automatically increase the number of worker threads as needed until `max_size` is reached.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if `max_size` is less than or equal to initial JobPool size.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use jobpool::JobPool;
+    ///
+    /// let pool_size: usize = 8; // number of cpu cores is recommended
+    /// let mut pool = JobPool::new(pool_size);
+    /// pool.auto_grow(100);
+    /// for _ in 0..1000 {
+    ///     pool.queue(|| {
+    ///         // do some work
+    ///     });
+    /// }
+    /// // ...
+    /// pool.shutdown(); // blocks until all jobs are done
+    /// ```
     pub fn auto_grow(&mut self, max_size: usize) {
         if max_size <= *self.size {
             panic!("max_size must be greater than initial JobPool size");
