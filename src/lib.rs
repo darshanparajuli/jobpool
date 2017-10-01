@@ -48,16 +48,30 @@ mod tests {
     #[test]
     fn shuts_down() {
         let mut pool = JobPool::new(10);
+
+        let pair = Arc::new((Mutex::new(false), Condvar::new()));
+
         for _ in 0..100 {
-            pool.queue(|| {
-                // fake work
-                thread::sleep(Duration::from_millis(100));
+            let pair2 = pair.clone();
+            pool.queue(move || {
+                let &(ref mutex, ref cvar) = &*pair2;
+                let mut guard = mutex.lock().unwrap();
+                while !*guard {
+                    guard = cvar.wait(guard).unwrap();
+                }
             });
         }
 
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(Duration::from_millis(500));
 
         assert_eq!(pool.active_workers_count(), 10);
+
+        let &(ref mutex, ref cvar) = &*pair;
+        let mut guard = mutex.lock().unwrap();
+        *guard = true;
+        cvar.notify_all();
+        drop(guard);
+
         pool.shutdown();
     }
 
