@@ -2,7 +2,7 @@
 name = "jobpool"
 version = "0.2.3"
 authors = ["Darshan Parajuli <parajulidarshan@gmail.com>"]
-description = "A simple fixed-size thread pool library"
+description = "A simple and lightweight threadpool implementation"
 repository = "https://github.com/darshanparajuli/jobpool"
 readme = "README.md"
 keywords = ["threadpool", "threads", "threading", "jobpool", "concurrency"]
