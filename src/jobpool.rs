@@ -143,13 +143,13 @@ impl JobPool {
     ///
     /// Creates a new job pool.
     ///
-    /// Using the number of cpu cores as argument for size is recommended.
+    /// Using the number of cpu cores as the argument for `size` is recommended.
     /// Higher values can result iSeqCstn larger memory footprint,
     /// and non-optimal performance.
     ///
     /// # Panics
     ///
-    /// This function will panic if the argument for size is 0.
+    /// This function will panic if the argument for `size` is 0.
     ///
     /// # Examples
     ///
@@ -215,7 +215,8 @@ impl JobPool {
 
     /// Queues a new "job".
     ///
-    /// A queued job gets run in a first-come, first-serve basis.
+    /// A "job" can be a closure with no arguments and returns, or
+    /// a type with `Runnable` trait. A queued job gets run in a first-come, first-serve basis.
     ///
     /// # Panics
     ///
