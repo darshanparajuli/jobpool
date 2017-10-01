@@ -511,11 +511,12 @@ mod tests {
 
         thread::sleep(Duration::from_millis(350));
 
+        assert!(pool.active_workers_count() > 8);
+
         let handles = pool.shutdown_no_wait();
         assert!(handles.is_some());
 
         let handles = handles.unwrap();
-        assert!(handles.len() > 8);
 
         for handle in handles {
             let _ = handle.join();
