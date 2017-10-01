@@ -336,8 +336,11 @@ impl JobPool {
 
     /// Shuts down this instance of JobPool without waiting for threads to finish.
     ///
-    /// This method will return all of the threads' `JoinHandle`s.
+    /// This method will return all of the threads' `JoinHandle`s (as few as initial JobPool size,
+    /// and as many as additional *active* threads if `auto_grow(...)` has been used.
     /// It won't wait for the threads to finish, and it must be called explicitly.
+    /// Once this method is called, this instance of JobPool will throw away jobs already in the queue while
+    /// running the one at hand.
     /// Calling `shutdown()` after this method won't have any effect.
     /// Unlike `shutdown()`, it doesn't get called automatically after going out of scope.
     ///
