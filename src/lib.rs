@@ -63,11 +63,13 @@ mod tests {
         for _ in 0..100 {
             pool.queue(|| {
                 // fake work
-                thread::sleep(Duration::from_millis(100));
+                thread::sleep(Duration::from_millis(1000));
             });
         }
-        thread::sleep(Duration::from_millis(50));
+
+        thread::sleep(Duration::from_millis(600));
         assert!(pool.active_workers_count() > 10);
+
         pool.shutdown();
     }
 
@@ -128,11 +130,11 @@ mod tests {
         for _ in 0..1000 {
             pool.queue(|| {
                 // fake work
-                thread::sleep(Duration::from_millis(500));
+                thread::sleep(Duration::from_millis(1000));
             });
         }
 
-        thread::sleep(Duration::from_millis(350));
+        thread::sleep(Duration::from_millis(600));
 
         assert!(pool.active_workers_count() > 8);
 
