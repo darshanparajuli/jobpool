@@ -1,6 +1,6 @@
 # JobPool
 
-A simple, lightweight, and fixed-size thread pool implementation for Rust.
+A simple and lightweight thread pool implementation for Rust.
 
 [![Build Status](https://travis-ci.org/darshanparajuli/jobpool.svg?branch=master)](https://travis-ci.org/darshanparajuli/jobpool)
 
