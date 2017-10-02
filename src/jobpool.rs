@@ -14,7 +14,7 @@ pub trait Runnable {
 }
 
 impl<F: FnOnce()> Runnable for F {
-    #[inline]
+    #[inline(always)]
     fn run(self: Box<F>) {
         (*self)()
     }
