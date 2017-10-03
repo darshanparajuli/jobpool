@@ -128,6 +128,20 @@ mod tests {
     }
 
     #[test]
+    #[should_panic]
+    fn panic_on_reuse_shutdown_no_wait() {
+        let mut pool = JobPool::new(10);
+        for _ in 0..100 {
+            pool.queue(|| {
+                // fake work
+                thread::sleep(Duration::from_millis(10));
+            });
+        }
+        pool.shutdown_no_wait();
+        pool.queue(|| { let a = 1 + 2; });
+    }
+
+    #[test]
     fn no_panic_on_multiple_shutdowns() {
         let mut pool = JobPool::new(10);
         for _ in 0..100 {
