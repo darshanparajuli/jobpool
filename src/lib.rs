@@ -137,7 +137,17 @@ mod tests {
                 thread::sleep(Duration::from_millis(10));
             });
         }
-        pool.shutdown_no_wait();
+
+        let handles = pool.shutdown_no_wait();
+
+        assert!(handles.is_some());
+
+        let handles = handles.unwrap();
+
+        for handle in handles {
+            let _ = handle.join();
+        }
+
         pool.queue(|| { let a = 1 + 2; });
     }
 
