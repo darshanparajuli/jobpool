@@ -276,7 +276,9 @@ impl JobPool {
         if self.shutdown.load(Ordering::SeqCst) {
             panic!("Error: this threadpool has been shutdown!");
         } else {
-            self.push(Box::new(job));
+            let mut guard = self.job_queue.lock().unwrap();
+            guard.push_back(Box::new(job));
+            self.condvar.notify_one();
             try_add_new_worker(
                 self.worker_id_counter.clone(),
                 self.job_queue.clone(),
@@ -324,12 +326,6 @@ impl JobPool {
     /// Get the number of current active worker threads.
     pub fn active_workers_count(&self) -> usize {
         return self.busy_workers_count.load(Ordering::SeqCst);
-    }
-
-    fn push(&mut self, job: BoxedJob) {
-        let mut guard = self.job_queue.lock().unwrap();
-        guard.push_back(job);
-        self.condvar.notify_one();
     }
 
     /// Shuts down this instance of JobPool.
