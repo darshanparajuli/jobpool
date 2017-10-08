@@ -6,7 +6,6 @@ use std::{process, thread};
 use std::collections::{HashMap, VecDeque};
 
 type BoxedJob = Box<Runnable + Send + 'static>;
-type Worker = Option<thread::JoinHandle<()>>;
 
 /// A trait for giving a type an ability to run some code.
 pub trait Runnable {
@@ -26,13 +25,13 @@ fn spawn_worker_thread(
     id_counter: Arc<AtomicUsize>,
     job_queue: Arc<Mutex<VecDeque<BoxedJob>>>,
     condvar: Arc<Condvar>,
-    workers: Arc<Mutex<HashMap<usize, Worker>>>,
-    removed_handles: Arc<Mutex<Vec<Worker>>>,
+    workers: Arc<Mutex<HashMap<usize, Option<thread::JoinHandle<()>>>>>,
+    removed_handles: Arc<Mutex<Vec<Option<thread::JoinHandle<()>>>>>,
     busy_workers_count: Arc<AtomicUsize>,
     min_size: Arc<usize>,
     max_size: Arc<AtomicUsize>,
     shutdown: Arc<AtomicBool>,
-) -> Worker {
+) -> Option<thread::JoinHandle<()>> {
     let builder = thread::Builder::new().name(format!("worker-{}", id));
     let handle = builder.spawn(move || loop {
         let (job, remaining_job_count) = {
@@ -105,7 +104,7 @@ fn try_add_new_worker(
     id_counter: Arc<AtomicUsize>,
     job_queue: Arc<Mutex<VecDeque<BoxedJob>>>,
     condvar: Arc<Condvar>,
-    workers: Arc<Mutex<HashMap<usize, Worker>>>,
+    workers: Arc<Mutex<HashMap<usize, Option<thread::JoinHandle<()>>>>>,
     removed_handles: Arc<Mutex<Vec<Option<thread::JoinHandle<()>>>>>,
     busy_workers_count: Arc<AtomicUsize>,
     min_size: Arc<usize>,
@@ -156,7 +155,7 @@ pub struct JobPool {
     max_size: Arc<AtomicUsize>,
     worker_id_counter: Arc<AtomicUsize>,
     busy_workers_count: Arc<AtomicUsize>,
-    workers: Arc<Mutex<HashMap<usize, Worker>>>,
+    workers: Arc<Mutex<HashMap<usize, Option<thread::JoinHandle<()>>>>>,
     removed_handles: Arc<Mutex<Vec<Option<thread::JoinHandle<()>>>>>,
     job_queue: Arc<Mutex<VecDeque<BoxedJob>>>,
     condvar: Arc<Condvar>,
