@@ -234,4 +234,23 @@ mod tests {
 
         pool.shutdown();
     }
+
+    #[test]
+    fn check_shutdown() {
+        let mut pool = JobPool::new(8);
+
+        let waiter = Arc::new(Waiter::new());
+        for _ in 0..10 {
+            let waiter = waiter.clone();
+            pool.queue(move || { waiter.wait(); });
+        }
+
+        assert_eq!(pool.has_shutdown(), false);
+
+        waiter.notify();
+
+        pool.shutdown();
+
+        assert_eq!(pool.has_shutdown(), true);
+    }
 }
