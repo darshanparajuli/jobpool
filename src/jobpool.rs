@@ -338,7 +338,7 @@ impl JobPool {
     /// pool.shutdown(); // blocks until all jobs are done
     /// ```
     pub fn shutdown(&mut self) {
-        if !self.can_shutdown() {
+        if !self.already_shutdown() {
             return;
         }
 
@@ -396,7 +396,7 @@ impl JobPool {
     /// }
     /// ```
     pub fn shutdown_no_wait(&mut self) -> Option<Vec<thread::JoinHandle<()>>> {
-        if !self.can_shutdown() {
+        if !self.already_shutdown() {
             return None;
         }
 
@@ -422,7 +422,7 @@ impl JobPool {
         Some(handles)
     }
 
-    fn can_shutdown(&mut self) -> bool {
+    fn already_shutdown(&mut self) -> bool {
         if self.shutdown.load(Ordering::SeqCst) {
             return false;
         }
