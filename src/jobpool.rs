@@ -422,6 +422,11 @@ impl JobPool {
         Some(handles)
     }
 
+    /// Check whether this JobPool instance has been shutdown.
+    pub fn has_shutdown(&self) -> bool {
+        return self.shutdown.load(Ordering::SeqCst);
+    }
+
     fn already_shutdown(&mut self) -> bool {
         if self.shutdown.load(Ordering::SeqCst) {
             return false;
