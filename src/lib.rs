@@ -99,14 +99,14 @@ mod tests {
 
         let waiter = Arc::new(Waiter::new());
 
-        for _ in 0..100 {
+        for _ in 0..1000 {
             let waiter = waiter.clone();
             pool.queue(move || { waiter.wait(); });
         }
 
-        thread::sleep(Duration::from_millis(500));
+        thread::sleep(Duration::from_millis(1000));
 
-        assert!(pool.active_workers_count() > 8);
+        assert_eq!(pool.active_workers_count(), 100);
 
         waiter.notify();
 
@@ -193,14 +193,14 @@ mod tests {
 
         let waiter = Arc::new(Waiter::new());
 
-        for _ in 0..100 {
+        for _ in 0..1000 {
             let waiter = waiter.clone();
             pool.queue(move || { waiter.wait(); });
         }
 
-        thread::sleep(Duration::from_millis(500));
+        thread::sleep(Duration::from_millis(1000));
 
-        assert!(pool.active_workers_count() > 8);
+        assert_eq!(pool.active_workers_count(), 100);
 
         waiter.notify();
 
