@@ -269,6 +269,8 @@ impl JobPool {
             let mut guard = self.job_queue.lock().unwrap();
             guard.push_back(Box::new(job));
             self.condvar.notify_one();
+            drop(guard);
+
             try_add_new_worker(
                 self.worker_id_counter.clone(),
                 self.job_queue.clone(),
