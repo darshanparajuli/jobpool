@@ -252,5 +252,6 @@ mod tests {
         pool.shutdown();
 
         assert_eq!(pool.has_shutdown(), true);
+        assert_eq!(pool.active_workers_count(), 0);
     }
 }
