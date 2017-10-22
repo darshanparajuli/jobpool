@@ -23,7 +23,7 @@ fn main() {
     for i in 0..100 {
         let tx = tx.clone();
         pool.queue(move || {
-            // Do some work, following is just an example
+            // Do some work, following is just for example's sake
             thread::sleep(Duration::from_millis(100));
             println!("sending: {}", i);
             tx.send(i).unwrap();
