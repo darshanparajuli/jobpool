@@ -3,9 +3,12 @@
 use std::sync::{Arc, Condvar, Mutex};
 use std::sync::atomic::{AtomicUsize, AtomicBool, Ordering};
 use std::{process, thread};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, BinaryHeap};
 
-type BoxedJob = Box<Runnable + Send + 'static>;
+type BoxedRunnable = Box<Runnable + Send + 'static>;
+
+/// A constant reference value for normal priority.
+pub const NORMAL_PRIORITY: isize = 0;
 
 /// A trait for giving a type an ability to run some code.
 pub trait Runnable {
@@ -20,10 +23,36 @@ impl<F: FnOnce()> Runnable for F {
     }
 }
 
+struct Job {
+    runnable: BoxedRunnable,
+    priority: isize,
+}
+
+impl PartialOrd for Job {
+    fn partial_cmp(&self, other: &Job) -> Option<::std::cmp::Ordering> {
+        Some(self.priority.cmp(&other.priority))
+    }
+}
+
+impl Ord for Job {
+    fn cmp(&self, other: &Job) -> ::std::cmp::Ordering {
+        self.priority.cmp(&other.priority)
+    }
+}
+
+impl PartialEq for Job {
+    fn eq(&self, other: &Job) -> bool {
+        self.priority == other.priority
+    }
+}
+
+impl Eq for Job {
+}
+
 fn spawn_worker_thread(
     id: usize,
     id_counter: Arc<AtomicUsize>,
-    job_queue: Arc<Mutex<VecDeque<BoxedJob>>>,
+    job_queue: Arc<Mutex<BinaryHeap<Job>>>,
     condvar: Arc<Condvar>,
     workers: Arc<Mutex<HashMap<usize, Option<thread::JoinHandle<()>>>>>,
     removed_handles: Arc<Mutex<Vec<Option<thread::JoinHandle<()>>>>>,
@@ -45,7 +74,7 @@ fn spawn_worker_thread(
             // println!("[worker-{}] got new new job", id);
 
             // queue is not empty at this point, so unwrap() is safe
-            (guard.pop_front(), guard.len())
+            (guard.pop(), guard.len())
         };
 
         if job.is_none() {
@@ -69,8 +98,8 @@ fn spawn_worker_thread(
             Some(remaining_job_count),
         );
 
-        // println!("[worker-{}] running job", id);
-        job.run();
+        // println!("[worker-{}] running job with priority {}", id, job.priority);
+        job.runnable.run();
 
         busy_workers_count.fetch_sub(1, Ordering::SeqCst);
 
@@ -102,7 +131,7 @@ fn spawn_worker_thread(
 
 fn try_add_new_worker(
     id_counter: Arc<AtomicUsize>,
-    job_queue: Arc<Mutex<VecDeque<BoxedJob>>>,
+    job_queue: Arc<Mutex<BinaryHeap<Job>>>,
     condvar: Arc<Condvar>,
     workers: Arc<Mutex<HashMap<usize, Option<thread::JoinHandle<()>>>>>,
     removed_handles: Arc<Mutex<Vec<Option<thread::JoinHandle<()>>>>>,
@@ -157,7 +186,7 @@ pub struct JobPool {
     busy_workers_count: Arc<AtomicUsize>,
     workers: Arc<Mutex<HashMap<usize, Option<thread::JoinHandle<()>>>>>,
     removed_handles: Arc<Mutex<Vec<Option<thread::JoinHandle<()>>>>>,
-    job_queue: Arc<Mutex<VecDeque<BoxedJob>>>,
+    job_queue: Arc<Mutex<BinaryHeap<Job>>>,
     condvar: Arc<Condvar>,
     shutdown: Arc<AtomicBool>,
 }
@@ -192,7 +221,7 @@ impl JobPool {
             panic!("size cannot be 0")
         }
 
-        let job_queue = Arc::new(Mutex::new(VecDeque::new()));
+        let job_queue = Arc::new(Mutex::new(BinaryHeap::new()));
         let condvar = Arc::new(Condvar::new());
         let max_size = Arc::new(AtomicUsize::new(0));
         let worker_id_counter = Arc::new(AtomicUsize::new(size));
@@ -237,9 +266,9 @@ impl JobPool {
         }
     }
 
-    /// Queues a new "job".
+    /// Queues a new `job`.
     ///
-    /// A "job" can be a closure with no arguments and returns, or
+    /// A `job` can be a closure with no arguments and returns, or
     /// a type with `Runnable` trait. A queued job gets run in a first-come, first-serve basis.
     ///
     /// # Panics
@@ -263,11 +292,55 @@ impl JobPool {
     where
         J: Runnable + Send + 'static,
     {
+        self.queue_job(job, NORMAL_PRIORITY);
+    }
+
+    /// Queues a new `job` with a given `priority`.
+    ///
+    /// A `job` can be a closure with no arguments and returns, or
+    /// a type with `Runnable` trait. A queued job with highest priority runs at given time.
+    /// The value for `priority` is totally relative. The constant `NORMAL_PRIORITY` (value = 0) can be used as
+    /// reference.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if the JobPool instance has already been shutdown.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use jobpool::JobPool;
+    ///
+    /// let pool_size: usize = 8; // number of cpu cores is recommended
+    /// let mut pool = JobPool::new(pool_size);
+    ///
+    /// for i in -10..10 {
+    ///     pool.queue_with_priority(move || {
+    ///         // do some work
+    ///     }, jobpool::NORMAL_PRIORITY + i);
+    /// }
+    /// // ...
+    /// pool.shutdown(); // blocks until all jobs are done
+    /// ```
+    pub fn queue_with_priority<J>(&mut self, job: J, priority: isize)
+    where
+        J: Runnable + Send + 'static,
+    {
+        self.queue_job(job, priority);
+    }
+
+    fn queue_job<J>(&mut self, job: J, priority: isize)
+    where
+        J: Runnable + Send + 'static,
+    {
         if self.shutdown.load(Ordering::SeqCst) {
             panic!("Error: this threadpool has been shutdown!");
         } else {
             let mut guard = self.job_queue.lock().unwrap();
-            guard.push_back(Box::new(job));
+            guard.push(Job {
+                runnable: Box::new(job),
+                priority: priority,
+            });
             self.condvar.notify_one();
             drop(guard);
 
