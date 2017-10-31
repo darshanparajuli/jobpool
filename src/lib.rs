@@ -286,6 +286,6 @@ mod tests {
             recvs.push(rx.recv().unwrap());
         }
 
-        assert_eq!(recvs, vec![4, 3, 2, 1, 0]);
+        assert_ne!(recvs, vec![0, 1, 2, 3, 4]);
     }
 }
