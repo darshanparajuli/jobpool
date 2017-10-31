@@ -28,6 +28,7 @@ fn main() {
             println!("sending: {}", i);
             tx.send(i).unwrap();
         });
+        // or pool.queue_with_priority(move || {...}, priority_val);
     }
 
     for _ in 0..100 {
