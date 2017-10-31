@@ -80,7 +80,9 @@ mod tests {
 
         for _ in 0..100 {
             let waiter = waiter.clone();
-            pool.queue(move || { waiter.wait(); });
+            pool.queue(move || {
+                waiter.wait();
+            });
         }
 
         thread::sleep(Duration::from_millis(500));
@@ -101,7 +103,9 @@ mod tests {
 
         for _ in 0..1000 {
             let waiter = waiter.clone();
-            pool.queue(move || { waiter.wait(); });
+            pool.queue(move || {
+                waiter.wait();
+            });
         }
 
         thread::sleep(Duration::from_millis(1000));
@@ -195,7 +199,9 @@ mod tests {
 
         for _ in 0..1000 {
             let waiter = waiter.clone();
-            pool.queue(move || { waiter.wait(); });
+            pool.queue(move || {
+                waiter.wait();
+            });
         }
 
         thread::sleep(Duration::from_millis(1000));
@@ -223,7 +229,9 @@ mod tests {
 
         for _ in 0..10 {
             let waiter = waiter.clone();
-            pool.queue(move || { waiter.wait(); });
+            pool.queue(move || {
+                waiter.wait();
+            });
         }
 
         thread::sleep(Duration::from_millis(500));
@@ -242,7 +250,9 @@ mod tests {
         let waiter = Arc::new(Waiter::new());
         for _ in 0..10 {
             let waiter = waiter.clone();
-            pool.queue(move || { waiter.wait(); });
+            pool.queue(move || {
+                waiter.wait();
+            });
         }
 
         assert_eq!(pool.has_shutdown(), false);
