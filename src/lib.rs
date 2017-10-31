@@ -34,8 +34,7 @@
 
 mod jobpool;
 
-pub use jobpool::JobPool;
-pub use jobpool::Runnable;
+pub use jobpool::*;
 
 #[cfg(test)]
 #[allow(unused)]
@@ -43,7 +42,7 @@ mod tests {
     use JobPool;
     use std::time::Duration;
     use std::thread;
-    use std::sync::{Arc, Mutex, Condvar};
+    use std::sync::{mpsc, Arc, Mutex, Condvar};
 
     struct Waiter {
         pair: (Mutex<bool>, Condvar),
@@ -253,5 +252,29 @@ mod tests {
 
         assert_eq!(pool.has_shutdown(), true);
         assert_eq!(pool.active_workers_count(), 0);
+    }
+
+    #[test]
+    fn queue_with_priority() {
+        let mut pool = JobPool::new(1);
+
+        let (tx, rx) = mpsc::channel();
+        for i in 0..5 {
+            let tx = tx.clone();
+            pool.queue_with_priority(
+                move || {
+                    tx.send(i).unwrap();
+                },
+                i,
+            );
+        }
+
+        let mut recvs = Vec::new();
+
+        for i in 0..5 {
+            recvs.push(rx.recv().unwrap());
+        }
+
+        assert_eq!(recvs, vec![4, 3, 2, 1, 0]);
     }
 }
