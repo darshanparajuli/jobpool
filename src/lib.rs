@@ -27,6 +27,7 @@
 //!     pool.queue(|| {
 //!         // do some work
 //!     });
+//!     // or pool.queue_with_priority(move || {...}, priority_val);
 //! }
 //! // ...
 //! pool.shutdown(); // waits for jobs to finish
