@@ -1,9 +1,10 @@
 #![warn(missing_docs)]
 
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap};
+use std::sync::atomic::{AtomicUsize, AtomicBool, Ordering as AtomicOrdering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::sync::atomic::{AtomicUsize, AtomicBool, Ordering};
 use std::{process, thread};
-use std::collections::{HashMap, BinaryHeap};
 
 type BoxedRunnable = Box<Runnable + Send + 'static>;
 
@@ -29,13 +30,13 @@ struct Job {
 }
 
 impl PartialOrd for Job {
-    fn partial_cmp(&self, other: &Job) -> Option<::std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Job) -> Option<Ordering> {
         Some(self.priority.cmp(&other.priority))
     }
 }
 
 impl Ord for Job {
-    fn cmp(&self, other: &Job) -> ::std::cmp::Ordering {
+    fn cmp(&self, other: &Job) -> Ordering {
         self.priority.cmp(&other.priority)
     }
 }
@@ -65,7 +66,7 @@ fn spawn_worker_thread(
     let handle = builder.spawn(move || loop {
         let (job, remaining_job_count) = {
             let mut guard = job_queue.lock().unwrap();
-            while guard.is_empty() && !shutdown.load(Ordering::SeqCst) {
+            while guard.is_empty() && !shutdown.load(AtomicOrdering::SeqCst) {
                 // println!("[worker-{}] waiting...", id);
                 guard = condvar.wait(guard).unwrap();
                 // println!("[worker-{}] notified", id);
@@ -83,7 +84,7 @@ fn spawn_worker_thread(
 
         let job = job.unwrap();
 
-        busy_workers_count.fetch_add(1, Ordering::SeqCst);
+        busy_workers_count.fetch_add(1, AtomicOrdering::SeqCst);
 
         try_add_new_worker(
             id_counter.clone(),
@@ -101,10 +102,10 @@ fn spawn_worker_thread(
         // println!("[worker-{}] running job with priority {}", id, job.priority);
         job.runnable.run();
 
-        busy_workers_count.fetch_sub(1, Ordering::SeqCst);
+        busy_workers_count.fetch_sub(1, AtomicOrdering::SeqCst);
 
         let mut guard = workers.lock().unwrap();
-        if guard.len() > *min_size && busy_workers_count.load(Ordering::SeqCst) < *min_size {
+        if guard.len() > *min_size && busy_workers_count.load(AtomicOrdering::SeqCst) < *min_size {
             let worker = guard.remove(&id);
             drop(guard);
 
@@ -141,10 +142,10 @@ fn try_add_new_worker(
     shutdown: Arc<AtomicBool>,
     remaining_job_count: Option<usize>,
 ) {
-    let max_size_prime = max_size.load(Ordering::SeqCst);
+    let max_size_prime = max_size.load(AtomicOrdering::SeqCst);
     if max_size_prime != 0 {
         // println!("remaining job count: {}", remaining_job_count);
-        let busy_workers = busy_workers_count.load(Ordering::SeqCst);
+        let busy_workers = busy_workers_count.load(AtomicOrdering::SeqCst);
         let mut guard = workers.lock().unwrap();
         let available_workers = guard.len() - busy_workers;
 
@@ -154,8 +155,8 @@ fn try_add_new_worker(
             }
         }
 
-        if guard.len() < max_size_prime && busy_workers >= *min_size && !shutdown.load(Ordering::SeqCst) {
-            let new_id = id_counter.fetch_add(1, Ordering::SeqCst);
+        if guard.len() < max_size_prime && busy_workers >= *min_size && !shutdown.load(AtomicOrdering::SeqCst) {
+            let new_id = id_counter.fetch_add(1, AtomicOrdering::SeqCst);
             // println!("inserting new one: {}", new_id);
             guard.insert(
                 new_id,
@@ -333,7 +334,7 @@ impl JobPool {
     where
         J: Runnable + Send + 'static,
     {
-        if self.shutdown.load(Ordering::SeqCst) {
+        if self.shutdown.load(AtomicOrdering::SeqCst) {
             panic!("Error: this threadpool has been shutdown!");
         } else {
             let mut guard = self.job_queue.lock().unwrap();
@@ -385,12 +386,12 @@ impl JobPool {
         if max_size <= *self.size {
             panic!("max_size must be greater than initial JobPool size");
         }
-        self.max_size.store(max_size, Ordering::SeqCst);
+        self.max_size.store(max_size, AtomicOrdering::SeqCst);
     }
 
     /// Get the number of current active worker threads.
     pub fn active_workers_count(&self) -> usize {
-        return self.busy_workers_count.load(Ordering::SeqCst);
+        return self.busy_workers_count.load(AtomicOrdering::SeqCst);
     }
 
     /// Shuts down this instance of JobPool.
@@ -499,15 +500,15 @@ impl JobPool {
 
     /// Check whether this JobPool instance has been shutdown.
     pub fn has_shutdown(&self) -> bool {
-        return self.shutdown.load(Ordering::SeqCst);
+        return self.shutdown.load(AtomicOrdering::SeqCst);
     }
 
     fn already_shutdown(&mut self) -> bool {
-        if self.shutdown.load(Ordering::SeqCst) {
+        if self.shutdown.load(AtomicOrdering::SeqCst) {
             return false;
         }
 
-        self.shutdown.store(true, Ordering::SeqCst);
+        self.shutdown.store(true, AtomicOrdering::SeqCst);
         self.condvar.notify_all();
 
         return true;
