@@ -86,7 +86,7 @@ fn spawn_worker_thread(
 
         busy_workers_count.fetch_add(1, AtomicOrdering::SeqCst);
 
-        try_add_new_worker(
+        let max_size_val = try_add_new_worker(
             id_counter.clone(),
             job_queue.clone(),
             condvar.clone(),
@@ -104,20 +104,22 @@ fn spawn_worker_thread(
 
         busy_workers_count.fetch_sub(1, AtomicOrdering::SeqCst);
 
-        let mut guard = workers.lock().unwrap();
-        if guard.len() > *min_size && busy_workers_count.load(AtomicOrdering::SeqCst) < *min_size {
-            let worker = guard.remove(&id);
-            drop(guard);
+        if max_size_val > 0 {
+            let mut guard = workers.lock().unwrap();
+            if guard.len() > *min_size && busy_workers_count.load(AtomicOrdering::SeqCst) < *min_size {
+                let worker = guard.remove(&id);
+                drop(guard);
 
-            if let Some(worker) = worker {
-                if let Some(handle) = worker {
-                    let mut guard = removed_handles.lock().unwrap();
-                    guard.push(Some(handle));
+                if let Some(worker) = worker {
+                    if let Some(handle) = worker {
+                        let mut guard = removed_handles.lock().unwrap();
+                        guard.push(Some(handle));
+                    }
                 }
-            }
 
-            // println!("[worker-{}] done working and REMOVED", id);
-            break;
+                // println!("[worker-{}] done working and REMOVED", id);
+                break;
+            }
         }
     });
 
@@ -141,9 +143,9 @@ fn try_add_new_worker(
     max_size: Arc<AtomicUsize>,
     shutdown: Arc<AtomicBool>,
     remaining_job_count: Option<usize>,
-) {
+) -> usize {
     let max_size_prime = max_size.load(AtomicOrdering::SeqCst);
-    if max_size_prime != 0 {
+    if max_size_prime > 0 {
         // println!("remaining job count: {}", remaining_job_count);
         let busy_workers = busy_workers_count.load(AtomicOrdering::SeqCst);
         let mut guard = workers.lock().unwrap();
@@ -151,7 +153,7 @@ fn try_add_new_worker(
 
         if let Some(remaining_job_count) = remaining_job_count {
             if remaining_job_count <= available_workers {
-                return;
+                return max_size_prime;
             }
         }
 
@@ -177,6 +179,8 @@ fn try_add_new_worker(
         }
         // drop(guard); // commented out just for the reminder...
     }
+
+    max_size_prime
 }
 
 /// JobPool manages a job queue to be run on a specified number of threads.
