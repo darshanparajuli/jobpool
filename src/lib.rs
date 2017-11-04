@@ -274,6 +274,7 @@ mod tests {
             let tx = tx.clone();
             pool.queue_with_priority(
                 move || {
+                    thread::sleep(Duration::from_millis(500));
                     tx.send(i).unwrap();
                 },
                 i,
