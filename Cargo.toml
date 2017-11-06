@@ -9,4 +9,5 @@ keywords = ["threadpool", "threads", "threading", "jobpool", "concurrency"]
 categories = ["concurrency"]
 license = "MIT"
 
-[dependencies]
+[badges]
+travis-ci = { repository = "darshanparajuli/jobpool" }
