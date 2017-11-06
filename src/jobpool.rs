@@ -395,7 +395,7 @@ impl JobPool {
 
     /// Get the number of current active worker threads.
     pub fn active_workers_count(&self) -> usize {
-        return self.busy_workers_count.load(AtomicOrdering::SeqCst);
+        self.busy_workers_count.load(AtomicOrdering::SeqCst)
     }
 
     /// Shuts down this instance of JobPool.
@@ -504,7 +504,7 @@ impl JobPool {
 
     /// Check whether this JobPool instance has been shutdown.
     pub fn has_shutdown(&self) -> bool {
-        return self.shutdown.load(AtomicOrdering::SeqCst);
+        self.shutdown.load(AtomicOrdering::SeqCst)
     }
 
     fn already_shutdown(&mut self) -> bool {
@@ -515,7 +515,7 @@ impl JobPool {
         self.shutdown.store(true, AtomicOrdering::SeqCst);
         self.condvar.notify_all();
 
-        return true;
+        true
     }
 }
 
