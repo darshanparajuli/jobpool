@@ -149,7 +149,12 @@ fn try_add_new_worker(
         // println!("remaining job count: {}", remaining_job_count);
         let busy_workers = busy_workers_count.load(AtomicOrdering::SeqCst);
         let mut guard = workers.lock().unwrap();
-        let available_workers = guard.len() - busy_workers;
+        let current_workers = guard.len();
+        let available_workers = if busy_workers > current_workers {
+            0
+        } else {
+            current_workers - busy_workers
+        };
 
         if let Some(remaining_job_count) = remaining_job_count {
             if remaining_job_count <= available_workers {
