@@ -57,6 +57,7 @@ struct WorkerState {
 }
 
 struct Worker {
+    id: usize,
     handle: Option<thread::JoinHandle<()>>,
 }
 
@@ -143,7 +144,7 @@ impl Worker {
             }
         };
 
-        Self { handle }
+        Self { id, handle }
     }
 }
 
@@ -449,20 +450,23 @@ impl JobPool {
             for (_, worker) in &mut guard.workers {
                 if let Some(handle) = worker.handle.take() {
                     // println!("[{}] shutting down", handle.thread().name().unwrap());
-                    handles.push(handle);
+                    handles.push((Some(worker.id), handle));
                 }
             }
 
             for handle in &mut guard.removed_handles {
-                handles.push(handle.take().unwrap());
+                handles.push((None, handle.take().unwrap()));
             }
             handles
         };
 
-        for handle in handles {
+        for (id, handle) in handles {
             match handle.join() {
                 Ok(_) => (),
-                Err(e) => eprintln!("Error joining thread: {:?}", e),
+                Err(e) => match id {
+                    Some(id) => eprintln!("Error joining worker-{} thread: {:?}", id, e),
+                    None => eprintln!("Error joining thread: {:?}", e),
+                },
             }
         }
     }
