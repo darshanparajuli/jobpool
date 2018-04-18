@@ -457,7 +457,10 @@ impl JobPool {
         drop(guard);
 
         for handle in handles {
-            let _ = handle.join();
+            match handle.join() {
+                Ok(_) => (),
+                Err(e) => eprintln!("Error joining thread: {:?}", e),
+            }
         }
     }
 
