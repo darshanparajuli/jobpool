@@ -49,14 +49,18 @@ impl PartialEq for Job {
 
 impl Eq for Job {}
 
+struct WorkerState {
+    workers: HashMap<usize, Option<thread::JoinHandle<()>>>,
+    removed_handles: Vec<Option<thread::JoinHandle<()>>>,
+    busy_workers: usize,
+    id_counter: usize,
+}
+
 fn spawn_worker_thread(
     id: usize,
-    id_counter: Arc<AtomicUsize>,
+    worker_state: Arc<Mutex<WorkerState>>,
     job_queue: Arc<Mutex<BinaryHeap<Job>>>,
     condvar: Arc<Condvar>,
-    workers: Arc<Mutex<HashMap<usize, Option<thread::JoinHandle<()>>>>>,
-    removed_handles: Arc<Mutex<Vec<Option<thread::JoinHandle<()>>>>>,
-    busy_workers_count: Arc<AtomicUsize>,
     min_size: Arc<usize>,
     max_size: Arc<AtomicUsize>,
     shutdown: Arc<AtomicBool>,
@@ -83,38 +87,36 @@ fn spawn_worker_thread(
 
         let job = job.unwrap();
 
-        busy_workers_count.fetch_add(1, AtomicOrdering::SeqCst);
+        {
+            let mut guard = worker_state.lock().unwrap();
+            if guard.busy_workers < guard.workers.len() {
+                guard.busy_workers += 1;
+            }
+        }
 
         let auto_grow = try_add_new_worker(
-            id_counter.clone(),
+            worker_state.clone(),
             job_queue.clone(),
             condvar.clone(),
-            workers.clone(),
-            removed_handles.clone(),
-            busy_workers_count.clone(),
             min_size.clone(),
             max_size.clone(),
             shutdown.clone(),
             Some(remaining_job_count),
         );
-
         // println!("[worker-{}] running job with priority {}", id, job.priority);
         job.runnable.run();
 
-        busy_workers_count.fetch_sub(1, AtomicOrdering::SeqCst);
+        let mut guard = worker_state.lock().unwrap();
+        if guard.busy_workers > 0 {
+            guard.busy_workers -= 1;
+        }
 
         if auto_grow {
-            let mut guard = workers.lock().unwrap();
-            if guard.len() > *min_size
-                && busy_workers_count.load(AtomicOrdering::SeqCst) < *min_size
-            {
-                let worker = guard.remove(&id);
-                drop(guard);
-
+            if guard.workers.len() > *min_size && guard.busy_workers < *min_size {
+                let worker = guard.workers.remove(&id);
                 if let Some(worker) = worker {
                     if let Some(handle) = worker {
-                        let mut guard = removed_handles.lock().unwrap();
-                        guard.push(Some(handle));
+                        guard.removed_handles.push(Some(handle));
                     }
                 }
 
@@ -134,12 +136,9 @@ fn spawn_worker_thread(
 }
 
 fn try_add_new_worker(
-    id_counter: Arc<AtomicUsize>,
+    worker_state: Arc<Mutex<WorkerState>>,
     job_queue: Arc<Mutex<BinaryHeap<Job>>>,
     condvar: Arc<Condvar>,
-    workers: Arc<Mutex<HashMap<usize, Option<thread::JoinHandle<()>>>>>,
-    removed_handles: Arc<Mutex<Vec<Option<thread::JoinHandle<()>>>>>,
-    busy_workers_count: Arc<AtomicUsize>,
     min_size: Arc<usize>,
     max_size: Arc<AtomicUsize>,
     shutdown: Arc<AtomicBool>,
@@ -151,9 +150,9 @@ fn try_add_new_worker(
     }
 
     // println!("remaining job count: {}", remaining_job_count);
-    let busy_workers = busy_workers_count.load(AtomicOrdering::SeqCst);
-    let mut guard = workers.lock().unwrap();
-    let total_workers = guard.len();
+    let mut guard = worker_state.lock().unwrap();
+    let busy_workers = guard.busy_workers;
+    let total_workers = guard.workers.len();
 
     assert!(total_workers <= max_size_val);
     assert!(busy_workers <= total_workers);
@@ -173,18 +172,18 @@ fn try_add_new_worker(
         return true;
     }
 
-    let new_id = id_counter.fetch_add(1, AtomicOrdering::SeqCst);
+    let new_id = {
+        guard.id_counter += 1;
+        guard.id_counter
+    };
     // println!("inserting new one: {}", new_id);
-    guard.insert(
+    guard.workers.insert(
         new_id,
         spawn_worker_thread(
             new_id,
-            id_counter.clone(),
+            worker_state.clone(),
             job_queue.clone(),
             condvar.clone(),
-            workers.clone(),
-            removed_handles.clone(),
-            busy_workers_count.clone(),
             min_size.clone(),
             max_size.clone(),
             shutdown.clone(),
@@ -200,10 +199,7 @@ fn try_add_new_worker(
 pub struct JobPool {
     size: Arc<usize>,
     max_size: Arc<AtomicUsize>,
-    worker_id_counter: Arc<AtomicUsize>,
-    busy_workers_count: Arc<AtomicUsize>,
-    workers: Arc<Mutex<HashMap<usize, Option<thread::JoinHandle<()>>>>>,
-    removed_handles: Arc<Mutex<Vec<Option<thread::JoinHandle<()>>>>>,
+    worker_state: Arc<Mutex<WorkerState>>,
     job_queue: Arc<Mutex<BinaryHeap<Job>>>,
     condvar: Arc<Condvar>,
     shutdown: Arc<AtomicBool>,
@@ -242,42 +238,38 @@ impl JobPool {
         let job_queue = Arc::new(Mutex::new(BinaryHeap::new()));
         let condvar = Arc::new(Condvar::new());
         let max_size = Arc::new(AtomicUsize::new(size));
-        let worker_id_counter = Arc::new(AtomicUsize::new(size));
-        let busy_workers_count = Arc::new(AtomicUsize::new(0));
         let shutdown = Arc::new(AtomicBool::new(false));
         let size = Arc::new(size);
-        let removed_handles = Arc::new(Mutex::new(Vec::new()));
 
-        let workers = {
-            let workers = Arc::new(Mutex::new(HashMap::new()));
-            let mut guard = workers.lock().unwrap();
+        let worker_state = Arc::new(Mutex::new(WorkerState {
+            workers: HashMap::new(),
+            removed_handles: Vec::new(),
+            busy_workers: 0,
+            id_counter: 0,
+        }));
+
+        {
+            let mut guard = worker_state.lock().unwrap();
             for id in 0..*size {
-                guard.insert(
+                guard.workers.insert(
                     id,
                     spawn_worker_thread(
                         id,
-                        worker_id_counter.clone(),
+                        worker_state.clone(),
                         job_queue.clone(),
                         condvar.clone(),
-                        workers.clone(),
-                        removed_handles.clone(),
-                        busy_workers_count.clone(),
                         size.clone(),
                         max_size.clone(),
                         shutdown.clone(),
                     ),
                 );
             }
-            workers.clone()
-        };
+        }
 
         Self {
             size,
             max_size,
-            worker_id_counter,
-            busy_workers_count,
-            workers,
-            removed_handles,
+            worker_state,
             job_queue,
             condvar,
             shutdown,
@@ -363,12 +355,9 @@ impl JobPool {
             drop(guard);
 
             try_add_new_worker(
-                self.worker_id_counter.clone(),
+                self.worker_state.clone(),
                 self.job_queue.clone(),
                 self.condvar.clone(),
-                self.workers.clone(),
-                self.removed_handles.clone(),
-                self.busy_workers_count.clone(),
                 self.size.clone(),
                 self.max_size.clone(),
                 self.shutdown.clone(),
@@ -408,7 +397,8 @@ impl JobPool {
 
     /// Get the number of current active worker threads.
     pub fn active_workers_count(&self) -> usize {
-        self.busy_workers_count.load(AtomicOrdering::SeqCst)
+        let guard = self.worker_state.lock().unwrap();
+        guard.busy_workers
     }
 
     /// Shuts down this instance of JobPool.
@@ -437,24 +427,23 @@ impl JobPool {
 
         self.notify_shutdown();
 
-        let mut handles = Vec::new();
+        let handles = {
+            let mut handles = Vec::new();
+            let mut guard = self.worker_state.lock().unwrap();
+            handles.reserve(guard.workers.len() + guard.removed_handles.len());
 
-        let mut guard = self.workers.lock().unwrap();
-        handles.reserve(guard.len());
-
-        for (_, worker) in &mut *guard {
-            if let Some(handle) = worker.take() {
-                // println!("[{}] shutting down", handle.thread().name().unwrap());
-                handles.push(handle);
+            for (_, worker) in &mut guard.workers {
+                if let Some(handle) = worker.take() {
+                    // println!("[{}] shutting down", handle.thread().name().unwrap());
+                    handles.push(handle);
+                }
             }
-        }
-        drop(guard);
 
-        let mut guard = self.removed_handles.lock().unwrap();
-        for handle in &mut *guard {
-            handles.push(handle.take().unwrap());
-        }
-        drop(guard);
+            for handle in &mut guard.removed_handles {
+                handles.push(handle.take().unwrap());
+            }
+            handles
+        };
 
         for handle in handles {
             match handle.join() {
@@ -502,22 +491,19 @@ impl JobPool {
 
         let mut handles = Vec::new();
 
-        let mut guard = self.workers.lock().unwrap();
-        handles.reserve(guard.len());
+        let mut guard = self.worker_state.lock().unwrap();
+        handles.reserve(guard.workers.len() + guard.removed_handles.len());
 
-        for (_, worker) in &mut *guard {
+        for (_, worker) in &mut guard.workers {
             if let Some(handle) = worker.take() {
                 // println!("[{}] shutting down", handle.thread().name().unwrap());
                 handles.push(handle);
             }
         }
-        drop(guard);
 
-        let mut guard = self.removed_handles.lock().unwrap();
-        for handle in &mut *guard {
+        for handle in &mut guard.removed_handles {
             handles.push(handle.take().unwrap());
         }
-        drop(guard);
 
         Some(handles)
     }
