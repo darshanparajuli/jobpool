@@ -1,7 +1,7 @@
 #![feature(test)]
 
-extern crate test;
 extern crate jobpool;
+extern crate test;
 
 use test::Bencher;
 use jobpool::JobPool;

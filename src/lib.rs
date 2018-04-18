@@ -43,7 +43,7 @@ mod tests {
     use JobPool;
     use std::time::Duration;
     use std::thread;
-    use std::sync::{mpsc, Arc, Mutex, Condvar};
+    use std::sync::{mpsc, Arc, Condvar, Mutex};
 
     struct Waiter {
         pair: (Mutex<bool>, Condvar),
@@ -128,7 +128,9 @@ mod tests {
             });
         }
         pool.shutdown();
-        pool.queue(|| { let a = 1 + 2; });
+        pool.queue(|| {
+            let a = 1 + 2;
+        });
     }
 
     #[test]
@@ -152,7 +154,9 @@ mod tests {
             let _ = handle.join();
         }
 
-        pool.queue(|| { let a = 1 + 2; });
+        pool.queue(|| {
+            let a = 1 + 2;
+        });
     }
 
     #[test]

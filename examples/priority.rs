@@ -13,11 +13,14 @@ fn main() {
 
     for i in 0..100 {
         let tx = tx.clone();
-        pool.queue_with_priority(move || {
-            thread::sleep(Duration::from_millis(100));
-            println!("sending: {}", i);
-            tx.send(i).unwrap();
-        }, i);
+        pool.queue_with_priority(
+            move || {
+                thread::sleep(Duration::from_millis(100));
+                println!("sending: {}", i);
+                tx.send(i).unwrap();
+            },
+            i,
+        );
     }
 
     for _ in 0..100 {

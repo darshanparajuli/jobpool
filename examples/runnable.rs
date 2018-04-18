@@ -20,9 +20,7 @@ fn main() {
     let mut pool = JobPool::new(pool_size);
 
     for i in 0..100 {
-        pool.queue(SomeStruct {
-            some_val: i,
-        });
+        pool.queue(SomeStruct { some_val: i });
     }
 
     pool.shutdown();
