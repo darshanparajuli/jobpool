@@ -144,8 +144,8 @@ fn try_add_new_worker(
     shutdown: Arc<AtomicBool>,
     remaining_job_count: Option<usize>,
 ) -> usize {
-    let max_size_prime = max_size.load(AtomicOrdering::SeqCst);
-    if max_size_prime > 0 {
+    let max_size_val = max_size.load(AtomicOrdering::SeqCst);
+    if max_size_val > 0 {
         // println!("remaining job count: {}", remaining_job_count);
         let busy_workers = busy_workers_count.load(AtomicOrdering::SeqCst);
         let mut guard = workers.lock().unwrap();
@@ -158,11 +158,11 @@ fn try_add_new_worker(
 
         if let Some(remaining_job_count) = remaining_job_count {
             if remaining_job_count <= available_workers {
-                return max_size_prime;
+                return max_size_val;
             }
         }
 
-        if guard.len() < max_size_prime && busy_workers >= *min_size && !shutdown.load(AtomicOrdering::SeqCst) {
+        if guard.len() < max_size_val && busy_workers >= *min_size && !shutdown.load(AtomicOrdering::SeqCst) {
             let new_id = id_counter.fetch_add(1, AtomicOrdering::SeqCst);
             // println!("inserting new one: {}", new_id);
             guard.insert(
@@ -185,7 +185,7 @@ fn try_add_new_worker(
         // drop(guard); // commented out just for the reminder...
     }
 
-    max_size_prime
+    max_size_val
 }
 
 /// JobPool manages a job queue to be run on a specified number of threads.
