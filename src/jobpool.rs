@@ -2,7 +2,7 @@
 
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
-use std::sync::atomic::{AtomicUsize, AtomicBool, Ordering as AtomicOrdering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::{process, thread};
 
@@ -47,8 +47,7 @@ impl PartialEq for Job {
     }
 }
 
-impl Eq for Job {
-}
+impl Eq for Job {}
 
 fn spawn_worker_thread(
     id: usize,
@@ -86,7 +85,7 @@ fn spawn_worker_thread(
 
         busy_workers_count.fetch_add(1, AtomicOrdering::SeqCst);
 
-        let max_size_val = try_add_new_worker(
+        let auto_grow = try_add_new_worker(
             id_counter.clone(),
             job_queue.clone(),
             condvar.clone(),
@@ -104,9 +103,11 @@ fn spawn_worker_thread(
 
         busy_workers_count.fetch_sub(1, AtomicOrdering::SeqCst);
 
-        if max_size_val > 0 {
+        if auto_grow {
             let mut guard = workers.lock().unwrap();
-            if guard.len() > *min_size && busy_workers_count.load(AtomicOrdering::SeqCst) < *min_size {
+            if guard.len() > *min_size
+                && busy_workers_count.load(AtomicOrdering::SeqCst) < *min_size
+            {
                 let worker = guard.remove(&id);
                 drop(guard);
 
@@ -143,49 +144,56 @@ fn try_add_new_worker(
     max_size: Arc<AtomicUsize>,
     shutdown: Arc<AtomicBool>,
     remaining_job_count: Option<usize>,
-) -> usize {
+) -> bool {
     let max_size_val = max_size.load(AtomicOrdering::SeqCst);
-    if max_size_val > 0 {
-        // println!("remaining job count: {}", remaining_job_count);
-        let busy_workers = busy_workers_count.load(AtomicOrdering::SeqCst);
-        let mut guard = workers.lock().unwrap();
-        let current_workers = guard.len();
-        let available_workers = if busy_workers > current_workers {
-            0
-        } else {
-            current_workers - busy_workers
-        };
-
-        if let Some(remaining_job_count) = remaining_job_count {
-            if remaining_job_count <= available_workers {
-                return max_size_val;
-            }
-        }
-
-        if guard.len() < max_size_val && busy_workers >= *min_size && !shutdown.load(AtomicOrdering::SeqCst) {
-            let new_id = id_counter.fetch_add(1, AtomicOrdering::SeqCst);
-            // println!("inserting new one: {}", new_id);
-            guard.insert(
-                new_id,
-                spawn_worker_thread(
-                    new_id,
-                    id_counter.clone(),
-                    job_queue.clone(),
-                    condvar.clone(),
-                    workers.clone(),
-                    removed_handles.clone(),
-                    busy_workers_count.clone(),
-                    min_size.clone(),
-                    max_size.clone(),
-                    shutdown.clone(),
-                ),
-            );
-            // println!("new workers size: {}", guard.len());
-        }
-        // drop(guard); // commented out just for the reminder...
+    if *min_size == max_size_val {
+        return false;
     }
 
-    max_size_val
+    // println!("remaining job count: {}", remaining_job_count);
+    let busy_workers = busy_workers_count.load(AtomicOrdering::SeqCst);
+    let mut guard = workers.lock().unwrap();
+    let total_workers = guard.len();
+
+    assert!(total_workers <= max_size_val);
+    assert!(busy_workers <= total_workers);
+
+    if busy_workers < total_workers || total_workers == max_size_val {
+        return true;
+    }
+
+    let available_workers = total_workers - busy_workers;
+    if let Some(remaining_job_count) = remaining_job_count {
+        if remaining_job_count <= available_workers {
+            return true;
+        }
+    }
+
+    if shutdown.load(AtomicOrdering::SeqCst) {
+        return true;
+    }
+
+    let new_id = id_counter.fetch_add(1, AtomicOrdering::SeqCst);
+    // println!("inserting new one: {}", new_id);
+    guard.insert(
+        new_id,
+        spawn_worker_thread(
+            new_id,
+            id_counter.clone(),
+            job_queue.clone(),
+            condvar.clone(),
+            workers.clone(),
+            removed_handles.clone(),
+            busy_workers_count.clone(),
+            min_size.clone(),
+            max_size.clone(),
+            shutdown.clone(),
+        ),
+    );
+    // println!("new workers size: {}", guard.len());
+    // drop(guard); // commented out just for the reminder...
+
+    true
 }
 
 /// JobPool manages a job queue to be run on a specified number of threads.
@@ -233,7 +241,7 @@ impl JobPool {
 
         let job_queue = Arc::new(Mutex::new(BinaryHeap::new()));
         let condvar = Arc::new(Condvar::new());
-        let max_size = Arc::new(AtomicUsize::new(0));
+        let max_size = Arc::new(AtomicUsize::new(size));
         let worker_id_counter = Arc::new(AtomicUsize::new(size));
         let busy_workers_count = Arc::new(AtomicUsize::new(0));
         let shutdown = Arc::new(AtomicBool::new(false));
