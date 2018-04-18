@@ -346,13 +346,8 @@ impl JobPool {
         if self.shutdown.load(AtomicOrdering::SeqCst) {
             panic!("Error: this threadpool has been shutdown!");
         } else {
-            let mut guard = self.job_queue.lock().unwrap();
-            guard.push(Job {
-                runnable: Box::new(job),
-                priority: priority,
-            });
+            self.push_new_job(job, priority);
             self.condvar.notify_one();
-            drop(guard);
 
             try_add_new_worker(
                 self.worker_state.clone(),
@@ -364,6 +359,17 @@ impl JobPool {
                 None,
             );
         }
+    }
+
+    fn push_new_job<J>(&mut self, job: J, priority: isize)
+    where
+        J: Runnable + Send + 'static,
+    {
+        let mut guard = self.job_queue.lock().unwrap();
+        guard.push(Job {
+            runnable: Box::new(job),
+            priority: priority,
+        });
     }
 
     /// Automatically increase the number of worker threads as needed until `max_size` is reached.
