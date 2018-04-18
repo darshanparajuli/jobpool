@@ -423,9 +423,11 @@ impl JobPool {
     /// pool.shutdown(); // blocks until all jobs are done
     /// ```
     pub fn shutdown(&mut self) {
-        if !self.already_shutdown() {
+        if self.has_shutdown() {
             return;
         }
+
+        self.notify_shutdown();
 
         let mut handles = Vec::new();
 
@@ -481,9 +483,11 @@ impl JobPool {
     /// }
     /// ```
     pub fn shutdown_no_wait(&mut self) -> Option<Vec<thread::JoinHandle<()>>> {
-        if !self.already_shutdown() {
+        if self.has_shutdown() {
             return None;
         }
+
+        self.notify_shutdown();
 
         let mut handles = Vec::new();
 
@@ -512,15 +516,9 @@ impl JobPool {
         self.shutdown.load(AtomicOrdering::SeqCst)
     }
 
-    fn already_shutdown(&mut self) -> bool {
-        if self.shutdown.load(AtomicOrdering::SeqCst) {
-            return false;
-        }
-
+    fn notify_shutdown(&mut self) {
         self.shutdown.store(true, AtomicOrdering::SeqCst);
         self.condvar.notify_all();
-
-        true
     }
 }
 
