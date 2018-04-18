@@ -50,149 +50,101 @@ impl PartialEq for Job {
 impl Eq for Job {}
 
 struct WorkerState {
-    workers: HashMap<usize, Option<thread::JoinHandle<()>>>,
+    workers: HashMap<usize, Worker>,
     removed_handles: Vec<Option<thread::JoinHandle<()>>>,
     busy_workers: usize,
     id_counter: usize,
 }
 
-fn spawn_worker_thread(
-    id: usize,
-    worker_state: Arc<Mutex<WorkerState>>,
-    job_queue: Arc<Mutex<BinaryHeap<Job>>>,
-    condvar: Arc<Condvar>,
-    min_size: Arc<usize>,
-    max_size: Arc<AtomicUsize>,
-    shutdown: Arc<AtomicBool>,
-) -> Option<thread::JoinHandle<()>> {
-    let builder = thread::Builder::new().name(format!("worker-{}", id));
-    let handle = builder.spawn(move || loop {
-        let (job, remaining_job_count) = {
-            let mut guard = job_queue.lock().unwrap();
-            while guard.is_empty() && !shutdown.load(AtomicOrdering::SeqCst) {
-                // println!("[worker-{}] waiting...", id);
-                guard = condvar.wait(guard).unwrap();
-                // println!("[worker-{}] notified", id);
-            }
-
-            // println!("[worker-{}] got new new job", id);
-
-            // queue is not empty at this point, so unwrap() is safe
-            (guard.pop(), guard.len())
-        };
-
-        if job.is_none() {
-            break;
-        }
-
-        let job = job.unwrap();
-
-        {
-            let mut guard = worker_state.lock().unwrap();
-            if guard.busy_workers < guard.workers.len() {
-                guard.busy_workers += 1;
-            }
-        }
-
-        let auto_grow = try_add_new_worker(
-            worker_state.clone(),
-            job_queue.clone(),
-            condvar.clone(),
-            min_size.clone(),
-            max_size.clone(),
-            shutdown.clone(),
-            Some(remaining_job_count),
-        );
-        // println!("[worker-{}] running job with priority {}", id, job.priority);
-        job.runnable.run();
-
-        let mut guard = worker_state.lock().unwrap();
-        if guard.busy_workers > 0 {
-            guard.busy_workers -= 1;
-        }
-
-        if auto_grow {
-            if guard.workers.len() > *min_size && guard.busy_workers < *min_size {
-                let worker = guard.workers.remove(&id);
-                if let Some(worker) = worker {
-                    if let Some(handle) = worker {
-                        guard.removed_handles.push(Some(handle));
-                    }
-                }
-
-                // println!("[worker-{}] done working and REMOVED", id);
-                break;
-            }
-        }
-    });
-
-    match handle {
-        Ok(h) => Some(h),
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            process::exit(1);
-        }
-    }
+struct Worker {
+    handle: Option<thread::JoinHandle<()>>,
 }
 
-fn try_add_new_worker(
-    worker_state: Arc<Mutex<WorkerState>>,
-    job_queue: Arc<Mutex<BinaryHeap<Job>>>,
-    condvar: Arc<Condvar>,
-    min_size: Arc<usize>,
-    max_size: Arc<AtomicUsize>,
-    shutdown: Arc<AtomicBool>,
-    remaining_job_count: Option<usize>,
-) -> bool {
-    let max_size_val = max_size.load(AtomicOrdering::SeqCst);
-    if *min_size == max_size_val {
-        return false;
+impl Worker {
+    fn new(
+        id: usize,
+        worker_state: Arc<Mutex<WorkerState>>,
+        job_queue: Arc<Mutex<BinaryHeap<Job>>>,
+        condvar: Arc<Condvar>,
+        min_size: Arc<usize>,
+        max_size: Arc<AtomicUsize>,
+        shutdown: Arc<AtomicBool>,
+    ) -> Self {
+        let builder = thread::Builder::new().name(format!("worker-{}", id));
+        let handle = builder.spawn(move || loop {
+            let (job, remaining_job_count) = {
+                let mut guard = job_queue.lock().unwrap();
+                while guard.is_empty() && !shutdown.load(AtomicOrdering::SeqCst) {
+                    // println!("[worker-{}] waiting...", id);
+                    guard = condvar.wait(guard).unwrap();
+                    // println!("[worker-{}] notified", id);
+                }
+
+                // println!("[worker-{}] got new new job", id);
+
+                // queue is not empty at this point, so unwrap() is safe
+                (guard.pop(), guard.len())
+            };
+
+            if job.is_none() {
+                break;
+            }
+
+            let job = job.unwrap();
+
+            {
+                let mut guard = worker_state.lock().unwrap();
+                if guard.busy_workers < guard.workers.len() {
+                    guard.busy_workers += 1;
+                }
+            }
+
+            let auto_grow = max_size.load(AtomicOrdering::SeqCst) > *min_size;
+            if auto_grow {
+                JobPool::try_grow(
+                    worker_state.clone(),
+                    job_queue.clone(),
+                    condvar.clone(),
+                    min_size.clone(),
+                    max_size.clone(),
+                    shutdown.clone(),
+                    Some(remaining_job_count),
+                );
+            }
+
+            // println!("[worker-{}] running job with priority {}", id, job.priority);
+            job.runnable.run();
+
+            let mut guard = worker_state.lock().unwrap();
+            if guard.busy_workers > 0 {
+                guard.busy_workers -= 1;
+            }
+
+            if auto_grow {
+                if guard.workers.len() > *min_size && guard.busy_workers < *min_size {
+                    let worker = guard.workers.remove(&id);
+                    if let Some(worker) = worker {
+                        if let Some(handle) = worker.handle {
+                            guard.removed_handles.push(Some(handle));
+                        }
+                    }
+
+                    // println!("[worker-{}] done working and REMOVED", id);
+                    break;
+                }
+            }
+        });
+
+        let handle = match handle {
+            Ok(h) => Some(h),
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                process::exit(1);
+            }
+        };
+
+        Self { handle }
     }
-
-    // println!("remaining job count: {}", remaining_job_count);
-    let mut guard = worker_state.lock().unwrap();
-    let busy_workers = guard.busy_workers;
-    let total_workers = guard.workers.len();
-
-    assert!(total_workers <= max_size_val);
-    assert!(busy_workers <= total_workers);
-
-    if busy_workers < total_workers || total_workers == max_size_val {
-        return true;
-    }
-
-    let available_workers = total_workers - busy_workers;
-    if let Some(remaining_job_count) = remaining_job_count {
-        if remaining_job_count <= available_workers {
-            return true;
-        }
-    }
-
-    if shutdown.load(AtomicOrdering::SeqCst) {
-        return true;
-    }
-
-    let new_id = {
-        guard.id_counter += 1;
-        guard.id_counter
-    };
-    // println!("inserting new one: {}", new_id);
-    guard.workers.insert(
-        new_id,
-        spawn_worker_thread(
-            new_id,
-            worker_state.clone(),
-            job_queue.clone(),
-            condvar.clone(),
-            min_size.clone(),
-            max_size.clone(),
-            shutdown.clone(),
-        ),
-    );
-    // println!("new workers size: {}", guard.len());
-    // drop(guard); // commented out just for the reminder...
-
-    true
 }
 
 /// JobPool manages a job queue to be run on a specified number of threads.
@@ -253,7 +205,7 @@ impl JobPool {
             for id in 0..*size {
                 guard.workers.insert(
                     id,
-                    spawn_worker_thread(
+                    Worker::new(
                         id,
                         worker_state.clone(),
                         job_queue.clone(),
@@ -349,16 +301,72 @@ impl JobPool {
             self.push_new_job(job, priority);
             self.condvar.notify_one();
 
-            try_add_new_worker(
-                self.worker_state.clone(),
-                self.job_queue.clone(),
-                self.condvar.clone(),
-                self.size.clone(),
-                self.max_size.clone(),
-                self.shutdown.clone(),
-                None,
-            );
+            if self.max_size.load(AtomicOrdering::SeqCst) > *self.size {
+                Self::try_grow(
+                    self.worker_state.clone(),
+                    self.job_queue.clone(),
+                    self.condvar.clone(),
+                    self.size.clone(),
+                    self.max_size.clone(),
+                    self.shutdown.clone(),
+                    None,
+                );
+            }
         }
+    }
+
+    fn try_grow(
+        worker_state: Arc<Mutex<WorkerState>>,
+        job_queue: Arc<Mutex<BinaryHeap<Job>>>,
+        condvar: Arc<Condvar>,
+        min_size: Arc<usize>,
+        max_size: Arc<AtomicUsize>,
+        shutdown: Arc<AtomicBool>,
+        remaining_job_count: Option<usize>,
+    ) {
+        // println!("remaining job count: {}", remaining_job_count);
+        let mut guard = worker_state.lock().unwrap();
+        let busy_workers = guard.busy_workers;
+        let total_workers = guard.workers.len();
+        let max_size_val = max_size.load(AtomicOrdering::SeqCst);
+
+        assert!(total_workers <= max_size_val);
+        assert!(busy_workers <= total_workers);
+
+        if busy_workers < total_workers || total_workers == max_size_val {
+            return;
+        }
+
+        let available_workers = total_workers - busy_workers;
+        if let Some(remaining_job_count) = remaining_job_count {
+            if remaining_job_count <= available_workers {
+                return;
+            }
+        }
+
+        if shutdown.load(AtomicOrdering::SeqCst) {
+            return;
+        }
+
+        let new_id = {
+            guard.id_counter += 1;
+            guard.id_counter
+        };
+        // println!("inserting new one: {}", new_id);
+        guard.workers.insert(
+            new_id,
+            Worker::new(
+                new_id,
+                worker_state.clone(),
+                job_queue.clone(),
+                condvar.clone(),
+                min_size.clone(),
+                max_size.clone(),
+                shutdown.clone(),
+            ),
+        );
+        // println!("new workers size: {}", guard.len());
+        // drop(guard); // commented out just for the reminder...
     }
 
     fn push_new_job<J>(&mut self, job: J, priority: isize)
@@ -439,7 +447,7 @@ impl JobPool {
             handles.reserve(guard.workers.len() + guard.removed_handles.len());
 
             for (_, worker) in &mut guard.workers {
-                if let Some(handle) = worker.take() {
+                if let Some(handle) = worker.handle.take() {
                     // println!("[{}] shutting down", handle.thread().name().unwrap());
                     handles.push(handle);
                 }
@@ -501,7 +509,7 @@ impl JobPool {
         handles.reserve(guard.workers.len() + guard.removed_handles.len());
 
         for (_, worker) in &mut guard.workers {
-            if let Some(handle) = worker.take() {
+            if let Some(handle) = worker.handle.take() {
                 // println!("[{}] shutting down", handle.thread().name().unwrap());
                 handles.push(handle);
             }
