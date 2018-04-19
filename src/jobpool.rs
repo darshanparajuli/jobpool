@@ -73,7 +73,7 @@ impl Worker {
     ) -> Self {
         let builder = thread::Builder::new().name(format!("worker-{}", id));
         let handle = builder.spawn(move || loop {
-            let (job, remaining_job_count) = {
+            let job = {
                 let mut guard = job_queue.lock().unwrap();
                 while guard.is_empty() && !shutdown.load(AtomicOrdering::SeqCst) {
                     // println!("[worker-{}] waiting...", id);
@@ -84,7 +84,7 @@ impl Worker {
                 // println!("[worker-{}] got new new job", id);
 
                 // queue is not empty at this point, so unwrap() is safe
-                (guard.pop(), guard.len())
+                guard.pop()
             };
 
             if job.is_none() {
@@ -109,7 +109,6 @@ impl Worker {
                     min_size.clone(),
                     max_size.clone(),
                     shutdown.clone(),
-                    Some(remaining_job_count),
                 );
             }
 
@@ -309,8 +308,7 @@ impl JobPool {
                     self.condvar.clone(),
                     self.size.clone(),
                     self.max_size.clone(),
-                    self.shutdown.clone(),
-                    None,
+                    self.shutdown.clone()
                 );
             }
         }
@@ -323,9 +321,14 @@ impl JobPool {
         min_size: Arc<usize>,
         max_size: Arc<AtomicUsize>,
         shutdown: Arc<AtomicBool>,
-        remaining_job_count: Option<usize>,
     ) {
         // println!("remaining job count: {}", remaining_job_count);
+
+        let remaining_job_count = {
+            let guard = job_queue.lock().unwrap();
+            guard.len()
+        };
+
         let mut guard = worker_state.lock().unwrap();
         let busy_workers = guard.busy_workers;
         let total_workers = guard.workers.len();
@@ -339,10 +342,8 @@ impl JobPool {
         }
 
         let available_workers = total_workers - busy_workers;
-        if let Some(remaining_job_count) = remaining_job_count {
-            if remaining_job_count <= available_workers {
-                return;
-            }
+        if remaining_job_count <= available_workers {
+            return;
         }
 
         if shutdown.load(AtomicOrdering::SeqCst) {
