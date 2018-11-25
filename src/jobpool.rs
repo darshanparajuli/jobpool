@@ -308,7 +308,7 @@ impl JobPool {
                     self.condvar.clone(),
                     self.size.clone(),
                     self.max_size.clone(),
-                    self.shutdown.clone()
+                    self.shutdown.clone(),
                 );
             }
         }
