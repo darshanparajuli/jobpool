@@ -3,8 +3,8 @@
 extern crate jobpool;
 extern crate test;
 
-use test::Bencher;
 use jobpool::JobPool;
+use test::Bencher;
 
 #[bench]
 fn queue(b: &mut Bencher) {

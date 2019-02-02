@@ -40,10 +40,10 @@ pub use jobpool::*;
 #[cfg(test)]
 #[allow(unused)]
 mod tests {
-    use JobPool;
-    use std::time::Duration;
-    use std::thread;
     use std::sync::{mpsc, Arc, Condvar, Mutex};
+    use std::thread;
+    use std::time::Duration;
+    use JobPool;
 
     struct Waiter {
         pair: (Mutex<bool>, Condvar),

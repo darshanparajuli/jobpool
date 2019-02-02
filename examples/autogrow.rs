@@ -1,9 +1,9 @@
 extern crate jobpool;
 
 use jobpool::JobPool;
+use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
-use std::sync::mpsc;
 
 fn main() {
     let pool_size = 8; // or number of cpu cores
