@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::{process, thread};
 
-type BoxedRunnable = Box<Runnable + Send + 'static>;
+type BoxedRunnable = Box<dyn Runnable + Send + 'static>;
 
 /// A constant reference value for normal priority.
 pub const NORMAL_PRIORITY: isize = 0;
@@ -120,18 +120,16 @@ impl Worker {
                 guard.busy_workers -= 1;
             }
 
-            if auto_grow {
-                if guard.workers.len() > *min_size && guard.busy_workers < *min_size {
-                    let worker = guard.workers.remove(&id);
-                    if let Some(worker) = worker {
-                        if let Some(handle) = worker.handle {
-                            guard.removed_handles.push(Some(handle));
-                        }
+            if auto_grow && guard.workers.len() > *min_size && guard.busy_workers < *min_size {
+                let worker = guard.workers.remove(&id);
+                if let Some(worker) = worker {
+                    if let Some(handle) = worker.handle {
+                        guard.removed_handles.push(Some(handle));
                     }
-
-                    // println!("[worker-{}] done working and REMOVED", id);
-                    break;
                 }
+
+                // println!("[worker-{}] done working and REMOVED", id);
+                break;
             }
         });
 
@@ -360,11 +358,11 @@ impl JobPool {
             Worker::new(
                 new_id,
                 worker_state.clone(),
-                job_queue.clone(),
-                condvar.clone(),
-                min_size.clone(),
-                max_size.clone(),
-                shutdown.clone(),
+                job_queue,
+                condvar,
+                min_size,
+                max_size,
+                shutdown,
             ),
         );
         // println!("new workers size: {}", guard.len());
@@ -378,7 +376,7 @@ impl JobPool {
         let mut guard = self.job_queue.lock().unwrap();
         guard.push(Job {
             runnable: Box::new(job),
-            priority: priority,
+            priority,
         });
     }
 
@@ -448,7 +446,7 @@ impl JobPool {
             let mut guard = self.worker_state.lock().unwrap();
             handles.reserve(guard.workers.len() + guard.removed_handles.len());
 
-            for (_, worker) in &mut guard.workers {
+            for worker in guard.workers.values_mut() {
                 if let Some(handle) = worker.handle.take() {
                     // println!("[{}] shutting down", handle.thread().name().unwrap());
                     handles.push((Some(worker.id), handle));
@@ -513,7 +511,7 @@ impl JobPool {
         let mut guard = self.worker_state.lock().unwrap();
         handles.reserve(guard.workers.len() + guard.removed_handles.len());
 
-        for (_, worker) in &mut guard.workers {
+        for worker in guard.workers.values_mut() {
             if let Some(handle) = worker.handle.take() {
                 // println!("[{}] shutting down", handle.thread().name().unwrap());
                 handles.push(handle);
